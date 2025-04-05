@@ -1,12 +1,33 @@
-# ServerUtils
+# ServerUtils 🛠️
 
-🛠️ A collection of simple but useful shell scripts for managing self-hosted servers.
+Welcome to ServerUtils! This is a growing collection of handy shell scripts designed to simplify common tasks on self-hosted servers, especially **Debian-based systems** (like those in Proxmox LXCs).
 
-These scripts are tested on **Proxmox LXC containers running Debian**. Use with caution on other environments.
+Think of these as simple tools to automate repetitive jobs and keep things running smoothly.
 
-## 📂 Structure
+## What's Inside? 📂
 
-- `Scripts/` – All scripts grouped into categorized subfolders (e.g., system maintenance, media tools, etc.)
+All the scripts live inside the [`Scripts/`](./Scripts/) directory, organized into categories. Each category folder contains:
 
-Each script directory contains its own README with usage and description.
+1.  The script(s).
+2.  A `README.md` explaining **exactly how to use each script** in that category (including usage, examples, and dependencies).
 
+**Available Categories:**
+
+* [`system-maintenance/`](./Scripts/system-maintenance/) - Scripts for updates, cleanup, etc.
+
+
+## Getting Started
+
+1.  Browse the [`Scripts/`](./Scripts/) directory and find a category/script that looks interesting.
+2.  Read the `README.md` *inside that category's folder* for detailed usage instructions.
+3.  Run the scripts! (Use with caution, especially if your environment differs significantly from Debian on Proxmox LXC).
+
+## Want to Contribute? ✨
+
+Found a bug? Have an idea for a new script? Contributions are welcome!
+
+* **Ideas & Bugs:** Please open an [Issue](https://github.com/ShinniUwU/ServerUtils/issues).
+* **Code Contributions:** Check out our simple **[Contributing Guide](CONTRIBUTING.md)** to see how you can add your own scripts or improvements using our GitHub Flow process.
+* **Be Nice:** Please follow our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Let's build a useful toolkit together!
