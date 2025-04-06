@@ -1,0 +1,29 @@
+name: Check Shell Script Formatting 🎨
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  shfmt-check:
+    name: Check Formatting (shfmt) ✨
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code 🛒
+        uses: actions/checkout@v4
+
+      - name: Run shfmt Format Check 🧐
+        run: |
+          echo " "
+          echo "🎨 Running 'shfmt -d' to check formatting on all .sh files..."
+          echo "-------------------------------------------------------------"
+          docker pull mvdan/shfmt:latest-alpine
+          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:latest-alpine -d ./Scripts
+          echo "-------------------------------------------------------------"
+          echo "✅ Formatting check complete! (Will fail if diffs were found)"
