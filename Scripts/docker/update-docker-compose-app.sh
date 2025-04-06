@@ -73,7 +73,7 @@ fi
 
 
 # --- Confirmation (Optional but Recommended) ---
-read -p "Are you sure you want to update the stack in '${TARGET_DIR}'? (y/N): " confirm
+read -r -p "Are you sure you want to update the stack in '${TARGET_DIR}'? (y/N): " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
     echoinfo "Aborted by user."
     exit 0

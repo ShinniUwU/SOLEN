@@ -64,6 +64,7 @@ if [ ${#TRUNCATE_LOGS[@]} -gt 0 ]; then
     if [ -f "$log_file" ]; then
       echoinfo "      Truncating ${log_file}..."
       # Use sudo here in case the script isn't run as root but needs to truncate system logs
+      # shellcheck disable=SC2317
       sudo truncate -s 0 "$log_file"
       echook "      ${log_file} truncated."
     else

@@ -6,7 +6,6 @@ set -euo pipefail
 # --- Colors (Optional) ---
 COLOR_RESET='\033[0m'
 COLOR_GREEN='\033[0;32m'
-COLOR_YELLOW='\033[0;33m'
 COLOR_CYAN='\033[0;36m'
 COLOR_BLUE='\033[0;34m'
 COLOR_RED='\033[0;31m'
