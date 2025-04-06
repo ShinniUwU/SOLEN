@@ -13,8 +13,12 @@ All the scripts live inside the [`Scripts/`](./Scripts/) directory, organized in
 
 **Available Categories:**
 
-* [`system-maintenance/`](./Scripts/system-maintenance/) - Scripts for updates, cleanup, etc.
-
+| Category                                           | Description                                                  |
+| :------------------------------------------------- | :----------------------------------------------------------- |
+| [`docker/`](./Scripts/docker/)                     | Utilities for managing Docker containers and images. 🐳      |
+| [`log-management/`](./Scripts/log-management/)     | Scripts for cleaning and managing system logs. 🪵            |
+| [`network/`](./Scripts/network/)                   | Tools for checking network status and information. 🌐        |
+| [`system-maintenance/`](./Scripts/system-maintenance/) | Scripts for general system updates and upkeep. 🔧            |
 
 ## Getting Started
 
