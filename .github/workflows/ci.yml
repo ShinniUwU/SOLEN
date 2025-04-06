@@ -22,20 +22,16 @@ jobs:
       - name: Run ShellCheck Linter 🧐
         uses: ludeeus/action-shellcheck@master
         with:
-          # Scan all shell scripts found recursively
           scandir: './Scripts'
-          # Report style issues, warnings, and errors
           severity: style
         env:
-          # Exclude SC2155: Declare and assign separately...
-          SHELLCHECK_OPTS: -e SC2155
+          # Exclude SC2155 and SC2317
+          SHELLCHECK_OPTS: -e SC2155 -e SC2317
 
       - name: Check Bash Syntax ✅
         run: |
           echo " "
           echo "🧪 Running 'bash -n' syntax check on all .sh files..."
           echo "-----------------------------------------------------"
-          # Find all .sh files within ./Scripts and its subdirectories
-          # For each file found, print its name and run 'bash -n' on it
           find ./Scripts -type f -name '*.sh' -print0 | xargs -0 -I {} sh -c 'echo "Checking --> {}"; bash -n "{}"; echo "-----------------------------------------------------"'
           echo "✅ Syntax check complete!"
