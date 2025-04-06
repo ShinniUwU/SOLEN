@@ -14,24 +14,27 @@ COLOR_CYAN='\033[0;36m'
 
 # --- Helper Functions ---
 echoinfo() {
-  echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
+	echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
 }
 
 echook() {
-  echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
+	echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
 }
 
 echowarn() {
-  echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
+	echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
 }
 
 # --- Sanity Checks ---
 if [[ $EUID -ne 0 ]]; then
-   echowarn "This script needs to be run as root (use sudo)."
-   exit 1
+	echowarn "This script needs to be run as root (use sudo)."
+	exit 1
 fi
 
-command -v apt >/dev/null 2>&1 || { echo >&2 "Error: apt command not found. This script requires a Debian-based system."; exit 1; }
+command -v apt >/dev/null 2>&1 || {
+	echo >&2 "Error: apt command not found. This script requires a Debian-based system."
+	exit 1
+}
 
 # --- Main Logic ---
 echoinfo "🧹 Starting system cleanup..."
