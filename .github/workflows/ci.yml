@@ -1,0 +1,41 @@
+name: Check Shell Scripts 🧪
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  lint-and-syntax-check:
+    name: Lint and Syntax Check ✨
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code 🛒
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck Linter 🧐
+        uses: ludeeus/action-shellcheck@master
+        with:
+          # Scan all shell scripts found recursively
+          scandir: './Scripts'
+          # Report style issues, warnings, and errors
+          severity: style
+        env:
+          # Exclude SC2155: Declare and assign separately...
+          SHELLCHECK_OPTS: -e SC2155
+
+      - name: Check Bash Syntax ✅
+        run: |
+          echo " "
+          echo "🧪 Running 'bash -n' syntax check on all .sh files..."
+          echo "-----------------------------------------------------"
+          # Find all .sh files within ./Scripts and its subdirectories
+          # For each file found, print its name and run 'bash -n' on it
+          find ./Scripts -type f -name '*.sh' -print0 | xargs -0 -I {} sh -c 'echo "Checking --> {}"; bash -n "{}"; echo "-----------------------------------------------------"'
+          echo "✅ Syntax check complete!"
