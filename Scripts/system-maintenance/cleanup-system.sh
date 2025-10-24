@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
 
+# SOLEN-META:
+# name: system-maintenance/cleanup-system
+# summary: Clean apt caches and remove unused dependencies
+# requires: apt,sudo
+# tags: apt,cleanup,maintenance
+# verbs: fix
+# since: 0.1.0
+# breaking: false
+# outputs: status, summary
+# root: true
+
 # Strict mode
 set -euo pipefail
 

@@ -1,0 +1,3 @@
+{"status":"ok","summary":"begin: backup etc at /var/backups/solen","ts":"2025-01-01T00:00:00Z","host":"host","actions":[]}
+{"status":"ok","summary":"would back up 3 sources (≈123456789 planned), would prune 1","ts":"2025-01-01T00:00:01Z","host":"host","actions":["mkdir -p /var/backups/solen/etc-YYYY...","rsync -aAXH ...","find /var/backups/solen -mtime +7 -delete"],"metrics":{"files_planned":4200,"bytes_planned":123456789,"prune_planned":1}}
+

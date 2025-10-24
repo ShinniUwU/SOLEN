@@ -60,6 +60,12 @@ We like to keep scripts organized!
     * **Purpose:** What does the script do?
     * **Usage / Examples:** How do you run it? Show command examples.
     * **Dependencies:** What does it need to run (e.g., `bash`, `apt`, `jq`, specific env vars)?
+* **SOLEN Standards:** New or updated scripts should follow `docs/SOLEN_SPEC.md`:
+    - Accept `--dry-run`, `--json`, `--yes` (or respect `SOLEN_NOOP=1`, `SOLEN_JSON=1`, `SOLEN_ASSUME_YES=1`).
+    - Use exit codes: `0` ok, `1` user error, `2` env/deps, `3` partial, `4` refused, `>=10` specific.
+    - Emit JSON per `docs/json-schema/solen.script.schema.json` when `--json` is used.
+    - Print exact actions under dry‑run and end with `would change N items`.
+    - Include a `SOLEN-META` header block below the shebang (name, summary, requires, tags, verbs, outputs, root).
 * **Update Main READMEs:** If you add a new script/category, please add it to the list in `Scripts/README.md` and the main `README.md` in the root folder.
 
 ### Quick Scripting Tips

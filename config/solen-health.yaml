@@ -1,0 +1,15 @@
+# SOLEN Health thresholds (scaffold)
+
+thresholds:
+  disk_root_pct:
+    warn: 85
+    error: 95
+  load15_per_core:
+    warn: 1.0
+    error: 2.0
+  mem_pressure_pct:
+    warn: 70
+    error: 85
+services:
+  allow: ["sshd", "cron", "docker", "jellyfin"]
+

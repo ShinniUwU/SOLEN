@@ -1,0 +1,3 @@
+{"status":"ok","summary":"begin: backup etc at /var/backups/solen","ts":"2025-01-01T00:00:00Z","host":"host","actions":[]}
+{"status":"ok","summary":"backup complete (111000000 copied, 2 sets pruned)","ts":"2025-01-01T00:00:20Z","host":"host","actions":["rsync -aAXH ...","ln -sfn ...","find ... -delete"],"metrics":{"files_copied":3900,"bytes_copied":111000000,"pruned":2}}
+

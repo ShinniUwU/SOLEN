@@ -1,0 +1,790 @@
+#!/usr/bin/env bash
+
+# ServerUtils central runner
+# - Lists and runs scripts from ./Scripts
+# - Optional install of runner and per-script symlinks for permanent access
+# - Simple audit log of invocations
+
+set -Eeuo pipefail
+IFS=$'\n\t'
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="${ROOT_DIR}/Scripts"
+# Audit path selection with env overrides
+DEFAULT_AUDIT_DIR="${ROOT_DIR}/.serverutils"
+AUDIT_DIR="${SOLEN_AUDIT_DIR:-$DEFAULT_AUDIT_DIR}"
+AUDIT_LOG="${SOLEN_AUDIT_LOG:-${AUDIT_DIR}/audit.log}"
+VERSION="0.1.0"
+
+# Colors
+COLOR_RESET='\033[0m'
+COLOR_GREEN='\033[0;32m'
+COLOR_YELLOW='\033[0;33m'
+COLOR_CYAN='\033[0;36m'
+COLOR_BLUE='\033[0;34m'
+COLOR_RED='\033[0;31m'
+
+echoinfo() { echo -e "${COLOR_CYAN}ℹ️  $*${COLOR_RESET}"; }
+echoheader() { echo -e "${COLOR_BLUE}--- $* ---${COLOR_RESET}"; }
+echook() { echo -e "${COLOR_GREEN}✅ $*${COLOR_RESET}"; }
+echowarn() { echo -e "${COLOR_YELLOW}⚠️  $*${COLOR_RESET}"; }
+echoerr() { echo -e "${COLOR_RED}❌ $*${COLOR_RESET}" 1>&2; }
+
+timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+ensure_audit() {
+  mkdir -p "${AUDIT_DIR}" || true
+  touch "${AUDIT_LOG}" || true
+}
+
+audit_log() {
+  # message
+  ensure_audit
+  echo "$(timestamp) $*" >>"${AUDIT_LOG}"
+}
+
+die() { echoerr "$*"; exit 1; }
+
+require_scripts_dir() {
+  [[ -d "${SCRIPTS_DIR}" ]] || die "Scripts directory not found at ${SCRIPTS_DIR}"
+}
+
+find_all_scripts() {
+  # Print absolute paths of scripts under Scripts/, excluding README
+  require_scripts_dir
+  find "${SCRIPTS_DIR}" -type f -name "*.sh" \
+    -not -path "${SCRIPTS_DIR}/lib/*" | sort -f
+}
+
+# --- SOLEN-META parsing ---
+read_meta() {
+  # Arg: script path. Output: key=value lines for SOLEN-META
+  local file="$1"
+  local in=0
+  local line
+  # Read first 80 lines only
+  local head
+  head=$(head -n 80 "$file" 2>/dev/null || true)
+  while IFS= read -r line; do
+    if [[ $in -eq 0 ]]; then
+      [[ "$line" =~ ^#\ SOLEN-META: ]] && in=1 && continue
+    else
+      # inside meta block
+      if [[ "$line" =~ ^#\  ]]; then
+        # strip leading '# '
+        line="${line#\# }"
+        # expect key: value
+        if [[ "$line" == *:* ]]; then
+          local key="${line%%:*}"
+          local val="${line#*: }"
+          # normalize key to lower-case and strip spaces
+          key=$(echo "$key" | tr 'A-Z ' 'a-z_')
+          printf '%s=%s\n' "$key" "$val"
+        fi
+      else
+        break
+      fi
+    fi
+  done <<< "$head"
+}
+
+meta_to_json_fields() {
+  # Arg: script path; prints JSON fragment like "\"summary\":\"...\", ..."
+  local file="$1"
+  local summary requires tags verbs outputs root since breaking alias
+  while IFS='=' read -r k v; do
+    case "$k" in
+      summary) summary="$v" ;;
+      requires) requires="$v" ;;
+      tags) tags="$v" ;;
+      verbs) verbs="$v" ;;
+      outputs) outputs="$v" ;;
+      root) root="$v" ;;
+      since) since="$v" ;;
+      breaking) breaking="$v" ;;
+      alias) alias="$v" ;;
+    esac
+  done < <(read_meta "$file")
+  # escape helper
+  _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  # lists: split on comma into JSON array
+  _arr() {
+    local s="$1"; s="${s#,}"; s="${s%,}"
+    if [[ -z "$s" ]]; then echo '[]'; return; fi
+    local IFS=','; read -r -a a <<< "$s" || true
+    local i=0; local out="["
+    for it in "${a[@]}"; do
+      local t="${it## }"; t="${t%% }"
+      [[ $i -gt 0 ]] && out+=" ,"
+      out+="\"$(_esc "$t")\""; i=$((i+1))
+    done
+    out+="]"; echo "$out"
+  }
+  printf '"meta":{"summary":"%s","requires":"%s","tags":%s,"verbs":%s,"outputs":"%s","root":"%s","since":"%s","breaking":"%s","alias":"%s"}' \
+    "$(_esc "${summary:-}")" "$(_esc "${requires:-}")" "$(_arr "${tags:-}")" "$(_arr "${verbs:-}")" "$(_esc "${outputs:-}")" "$(_esc "${root:-}")" "$(_esc "${since:-}")" "$(_esc "${breaking:-}")" "$(_esc "${alias:-}")"
+}
+
+script_key_for() {
+  # $1 absolute path; outputs key as category/name (without .sh)
+  local path="$1"
+  local rel="${path#${SCRIPTS_DIR}/}"
+  local dir
+  dir="$(dirname "$rel")"
+  local base
+  base="$(basename "$rel" ".sh")"
+  echo "${dir}/${base}"
+}
+
+print_list_text() {
+  local last_cat=""
+  while IFS= read -r f; do
+    local rel="${f#${SCRIPTS_DIR}/}"
+    local cat="$(dirname "$rel")"
+    local name_noext="$(basename "$rel" ".sh")"
+    if [[ "$cat" != "$last_cat" ]]; then
+      [[ -n "$last_cat" ]] && echo
+      echoheader "$cat"
+      last_cat="$cat"
+    fi
+    local summary
+    summary=$(read_meta "$f" | sed -n 's/^summary=//p' | head -n1)
+    if [[ -n "$summary" ]]; then
+      printf "  - %s — %s\n" "$name_noext" "$summary"
+    else
+      printf "  - %s\n" "$name_noext"
+    fi
+  done < <(find_all_scripts)
+}
+
+print_list_json() {
+  local first=1
+  echo "["
+  while IFS= read -r f; do
+    local rel="${f#${SCRIPTS_DIR}/}"
+    local cat="$(dirname "$rel")"
+    local name_noext="$(basename "$rel" ".sh")"
+    local name_with_ext="$(basename "$rel")"
+    local path_json
+    # Escape JSON for path
+    path_json=$(printf '%s' "$f" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    if [[ $first -eq 0 ]]; then echo ","; fi
+    printf '{"category":"%s","name":"%s","filename":"%s","key":"%s","path":"%s",%s}' \
+      "$cat" "$name_noext" "$name_with_ext" "$cat/$name_noext" "$path_json" "$(meta_to_json_fields "$f")"
+    first=0
+  done < <(find_all_scripts)
+  echo
+  echo "]"
+}
+
+cmd_overview() {
+  echoinfo "Environment summary"
+  local tools=(docker docker-compose apt dnf systemctl journalctl ss ip rsync)
+  for t in "${tools[@]}"; do
+    if command -v "$t" >/dev/null 2>&1; then
+      echo "  ✓ $t"
+    else
+      echo "  - $t (missing)"
+    fi
+  done
+  echo
+  echoinfo "Scripts by category"
+  declare -A counts
+  while IFS= read -r f; do
+    local rel="${f#${SCRIPTS_DIR}/}"; local cat="$(dirname "$rel")"
+    counts["$cat"]=$(( ${counts["$cat"]:-0} + 1 ))
+  done < <(find_all_scripts)
+  for c in "${!counts[@]}"; do
+    echo "  - $c: ${counts[$c]}"
+  done | sort
+  echo
+  echoinfo "Next steps"
+  echo "  - List scripts:        serverutils list --long"
+  echo "  - Health check:        serverutils run health/check"
+  echo "  - Network inventory:   serverutils run network/network-info"
+  echo "  - Install runner:      serverutils install-runner --user"
+}
+
+cmd_home() {
+  # If TTY and not disabled, show a simple interactive menu
+  if { [[ -t 1 ]] || [[ "${FORCE_TUI:-0}" == "1" ]]; } && [[ "${SOLEN_NO_TUI:-0}" != "1" ]]; then
+    while true; do
+      command -v clear >/dev/null 2>&1 && clear || true
+      [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && { cat "${ROOT_DIR}/asciiart.ascii"; echo; }
+      echo "SOLEN Runner — choose an action:"
+      echo "  1) List scripts with summaries"
+      echo "  2) Network inventory (IPs, ports, ping)"
+      echo "  3) Health check"
+      echo "  4) Apt update/upgrade (dry-run)"
+      echo "  5) Install runner (user)"
+      echo "  6) Overview"
+      echo "  q) Quit"
+      printf "> "
+      local choice
+      read -r choice
+      case "$choice" in
+        1) cmd_list; ;;
+        2) cmd_run network/network-info; ;;
+        3) cmd_run health/check; ;;
+        4) cmd_run system-maintenance/update-and-report -- --dry-run; ;;
+        5) cmd_install_runner --user; ;;
+        6) cmd_overview; ;;
+        q|Q|"" ) break ;;
+        *) echoerr "Unknown choice" ;;
+      esac
+      echo
+      printf "Press Enter to return to menu..."; read -r _discard || true
+    done
+  else
+    show_help
+  fi
+}
+
+cmd_list() {
+  local json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --long|-l) shift ;; # summaries are shown by default in text mode
+      *) echoerr "Unknown option for list: $1"; exit 2 ;;
+    esac
+  done
+  if [[ $json -eq 1 ]]; then
+    print_list_json
+  else
+    print_list_text
+  fi
+}
+
+resolve_script_by_key_or_name() {
+  # $1 query (key or name or path), prints resolved absolute path or nothing
+  local query="$1"
+  local matches=()
+
+  if [[ -f "$query" ]]; then
+    # direct path
+    printf '%s\n' "$(cd "$(dirname "$query")" && pwd)/$(basename "$query")"
+    return 0
+  fi
+
+  while IFS= read -r f; do
+    local key
+    key="$(script_key_for "$f")"
+    local name_only
+    name_only="$(basename "$f" ".sh")"
+    if [[ "$key" == "$query" ]] || [[ "$name_only" == "$query" ]] || [[ "$key" == *"$query"* ]] || [[ "$name_only" == *"$query"* ]]; then
+      matches+=("$f")
+    fi
+  done < <(find_all_scripts)
+
+  if [[ ${#matches[@]} -eq 1 ]]; then
+    printf '%s\n' "${matches[0]}"
+  else
+    printf '%s\n' "${matches[@]}"
+  fi
+}
+
+choose_interactively() {
+  # Input: list of lines on stdin; Output: chosen line
+  local items=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && items+=("$line")
+  done
+  local count=${#items[@]}
+  if [[ $count -eq 0 ]]; then
+    return 1
+  elif [[ $count -eq 1 ]]; then
+    printf '%s\n' "${items[0]}"
+    return 0
+  fi
+  echoinfo "Multiple matches found:"
+  local i=1
+  for it in "${items[@]}"; do
+    local key
+    key="$(script_key_for "$it")"
+    printf "  [%d] %s (%s)\n" "$i" "$key" "$it"
+    i=$((i+1))
+  done
+  printf "Select [1-%d]: " "$count"
+  local sel
+  read -r sel
+  if [[ -z "$sel" ]] || ! [[ "$sel" =~ ^[0-9]+$ ]] || (( sel < 1 || sel > count )); then
+    echoerr "Invalid selection"
+    return 2
+  fi
+  printf '%s\n' "${items[$((sel-1))]}"
+}
+
+cmd_run() {
+  local json=0 dry_run=0
+  local query=""
+  # Split runner args and script args by --
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      --) shift; break ;;
+      -*) echoerr "Unknown option for run: $1"; exit 2 ;;
+      *) query="$1"; shift ;;
+    esac
+  done
+  local script_args=("$@")
+  [[ -n "$query" ]] || die "Usage: serverutils run <category/name|name|path> [-- <args...>]"
+
+  local resolved
+  local candidates
+  candidates="$(resolve_script_by_key_or_name "$query")"
+  if [[ -z "$candidates" ]]; then die "No script matching '$query'"; fi
+  if [[ "$(printf '%s\n' "$candidates" | wc -l)" -gt 1 ]]; then
+    resolved="$(printf '%s\n' "$candidates" | choose_interactively)" || exit 2
+  else
+    resolved="$candidates"
+  fi
+
+  [[ -x "$resolved" ]] || chmod +x "$resolved" || true
+  local key
+  key="$(script_key_for "$resolved")"
+  audit_log "RUN key=${key} path=${resolved} args=$(printf '%q ' "${script_args[@]}" ) user=${USER:-unknown}"
+
+  if [[ $dry_run -eq 1 ]]; then
+    echoinfo "[dry-run] Would execute: $resolved ${script_args[*]:-}"
+    if [[ $json -eq 1 ]]; then
+      # Keep JSON simple to avoid complex quoting; args are a single concatenated string
+      local args_concat
+      args_concat="${script_args[*]:-}"
+      # Basic string escape for JSON (quotes and backslashes)
+      local args_json
+      args_json=$(printf '%s' "$args_concat" | sed 's/\\/\\\\/g; s/"/\\"/g')
+      printf '{"status":"dry-run","key":"%s","path":"%s","args":"%s"}\n' \
+        "$key" "$resolved" "$args_json"
+    fi
+    return 0
+  fi
+
+  echoinfo "Executing ${key}..."
+  set +e
+  "${resolved}" "${script_args[@]}"
+  local rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then
+    echook "Completed (${key})"
+  else
+    echoerr "Script failed with exit code ${rc} (${key})"
+  fi
+  if [[ $json -eq 1 ]]; then
+    printf '{"status":"%s","exit_code":%d,"key":"%s","path":"%s"}\n' \
+      "$([ $rc -eq 0 ] && echo ok || echo error)" "$rc" "$key" "$resolved"
+  fi
+  return $rc
+}
+
+cmd_search() {
+  local query=""
+  local json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      *) query="$1"; shift ;;
+    esac
+  done
+  [[ -n "$query" ]] || die "Usage: serverutils search <query> [--json]"
+  local results=()
+  while IFS= read -r f; do
+    local key name
+    key="$(script_key_for "$f")"
+    name="$(basename "$f")"
+    # include SOLEN-META fields in search (summary, tags, verbs)
+    local meta
+    meta=$(read_meta "$f" | tr '\n' ' ')
+    if echo "$key" | grep -qi -- "$query" || echo "$name" | grep -qi -- "$query" || echo "$meta" | grep -qi -- "$query"; then
+      results+=("$f")
+    fi
+  done < <(find_all_scripts)
+
+  if [[ $json -eq 1 ]]; then
+    local first=1
+    echo "["
+    for f in "${results[@]}"; do
+      local rel="${f#${SCRIPTS_DIR}/}"
+      local cat="$(dirname "$rel")"
+      local name_noext="$(basename "$rel" ".sh")"
+      if [[ $first -eq 0 ]]; then echo ","; fi
+      printf '{"category":"%s","name":"%s","key":"%s","path":"%s"}' \
+        "$cat" "$name_noext" "$cat/$name_noext" "$f"
+      first=0
+    done
+    echo
+    echo "]"
+  else
+    for f in "${results[@]}"; do
+      local info
+      info=$(read_meta "$f" | sed -n 's/^summary=//p' | head -n1)
+      echo "$(script_key_for "$f") -> $f${info:+ — $info}"
+    done
+  fi
+}
+
+expand_tilde() {
+  local p="$1"
+  if [[ "$p" == ~* ]]; then
+    eval echo "$p"
+  else
+    echo "$p"
+  fi
+}
+
+cmd_install_runner() {
+  local scope="user" # user|global
+  local force=0
+  # default to installing both names for friendliness
+  local names=(serverutils solen)
+  local explicit=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope="global"; shift ;;
+      --user) scope="user"; shift ;;
+      --force) force=1; shift ;;
+      --name)
+        explicit=1
+        names=("$2")
+        shift 2 ;;
+      --alias)
+        names+=("$2")
+        shift 2 ;;
+      *) echoerr "Unknown option: $1"; exit 2 ;;
+    esac
+  done
+  # dedupe names
+  local uniq=()
+  local seen
+  for n in "${names[@]}"; do
+    seen=0
+    for u in "${uniq[@]}"; do [[ "$u" == "$n" ]] && seen=1 && break; done
+    [[ $seen -eq 0 ]] && uniq+=("$n")
+  done
+  names=("${uniq[@]}")
+
+  local bindir
+  if [[ "$scope" == "global" ]]; then bindir="/usr/local/bin"; else bindir="${HOME}/.local/bin"; fi
+  mkdir -p "$bindir"
+  local installed=()
+  for bin in "${names[@]}"; do
+    local target="$bindir/$bin"
+    if [[ -e "$target" && $force -eq 0 ]]; then
+      echowarn "Exists (skip): $target (use --force to overwrite)"
+      continue
+    fi
+    [[ -e "$target" ]] && rm -f "$target"
+    if [[ "$scope" == "global" && $EUID -ne 0 ]]; then
+      echoinfo "Elevating to install globally at $target"
+      sudo ln -s "${ROOT_DIR}/serverutils" "$target"
+    else
+      ln -s "${ROOT_DIR}/serverutils" "$target"
+    fi
+    installed+=("$target")
+  done
+  if [[ ${#installed[@]} -gt 0 ]]; then
+    echook "Installed runner command(s): ${names[*]} -> $bindir"
+    echoinfo "This is the SOLEN runner. Try: '${names[0]} list --long'"
+  else
+    echowarn "Nothing installed"
+  fi
+  audit_log "INSTALL_RUNNER scope=${scope} names=${names[*]} user=${USER:-unknown}"
+  if [[ "$scope" == "user" ]]; then
+    local path_entry
+    path_entry="${HOME}/.local/bin"
+    if ! echo ":$PATH:" | grep -q ":${path_entry}:"; then
+      echowarn "${path_entry} not in PATH. Add: export PATH=\"$path_entry:\$PATH\""
+    fi
+  fi
+}
+
+cmd_install_scripts() {
+  local scope="user" prefix="su-" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope="global"; shift ;;
+      --user) scope="user"; shift ;;
+      --prefix) prefix="$2"; shift 2 ;;
+      --force) force=1; shift ;;
+      *) echoerr "Unknown option: $1"; exit 2 ;;
+    esac
+  done
+  local bindir
+  if [[ "$scope" == "global" ]]; then
+    bindir="/usr/local/bin"
+  else
+    bindir="${HOME}/.local/bin"
+  fi
+  mkdir -p "$bindir"
+  local count=0
+  while IFS= read -r f; do
+    local key
+    key="$(script_key_for "$f")"
+    local cat name
+    cat="${key%/*}"; name="${key##*/}"
+    local link="$bindir/${prefix}${cat//\//-}-${name}"
+    if [[ -e "$link" ]] && [[ $force -eq 0 ]]; then
+      echowarn "Exists (skip): $link"
+      continue
+    fi
+    [[ -e "$link" ]] && rm -f "$link"
+    if [[ "$scope" == "global" && $EUID -ne 0 ]]; then
+      sudo ln -s "$f" "$link"
+    else
+      ln -s "$f" "$link"
+    fi
+    count=$((count+1))
+  done < <(find_all_scripts)
+  echook "Installed $count script symlinks into $bindir (prefix='${prefix}')"
+  audit_log "INSTALL_SCRIPTS scope=${scope} dir=${bindir} prefix=${prefix} user=${USER:-unknown} count=${count}"
+  if [[ "$scope" == "user" ]]; then
+    if ! echo ":$PATH:" | grep -q ":${bindir}:"; then
+      echowarn "${bindir} not in PATH. Add: export PATH=\"$bindir:\$PATH\""
+    fi
+  fi
+}
+
+cmd_uninstall_scripts() {
+  local scope="user" prefix="su-"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope="global"; shift ;;
+      --user) scope="user"; shift ;;
+      --prefix) prefix="$2"; shift 2 ;;
+      *) echoerr "Unknown option: $1"; exit 2 ;;
+    esac
+  done
+  local bindir
+  if [[ "$scope" == "global" ]]; then
+    bindir="/usr/local/bin"
+  else
+    bindir="${HOME}/.local/bin"
+  fi
+  local removed=0
+  if [[ -d "$bindir" ]]; then
+    while IFS= read -r f; do
+      local name
+      name="$(basename "$f")"
+      if [[ "$name" == ${prefix}* ]]; then
+        if [[ "$scope" == "global" && $EUID -ne 0 ]]; then
+          sudo rm -f "$f" || true
+        else
+          rm -f "$f" || true
+        fi
+        removed=$((removed+1))
+      fi
+    done < <(find "$bindir" -maxdepth 1 -type l -print)
+  fi
+  echook "Removed $removed symlinks from $bindir (prefix='${prefix}')"
+  audit_log "UNINSTALL_SCRIPTS scope=${scope} dir=${bindir} prefix=${prefix} user=${USER:-unknown} removed=${removed}"
+}
+
+cmd_doctor() {
+  local missing=0
+  local deps=(bash find awk sed grep)
+  for d in "${deps[@]}"; do
+    if ! command -v "$d" >/dev/null 2>&1; then
+      echoerr "Missing dependency: $d"
+      missing=1
+    fi
+  done
+  if [[ ! -d "$SCRIPTS_DIR" ]]; then
+    echoerr "Missing Scripts directory at $SCRIPTS_DIR"
+    missing=1
+  fi
+  if [[ $missing -eq 0 ]]; then
+    echook "Environment looks good."
+  else
+    exit 1
+  fi
+}
+
+show_help() {
+  # Print ASCII banner if present
+  if [[ -f "${ROOT_DIR}/asciiart.ascii" ]]; then
+    cat "${ROOT_DIR}/asciiart.ascii"
+    echo
+  fi
+  cat <<'EOF'
+ServerUtils Runner (SOLEN)
+
+Usage:
+  serverutils list [--json]
+  serverutils list --long      # list with one-line summaries
+  serverutils search <query> [--json]
+  serverutils run <category/name|name|path> [--json] [--dry-run] [-- <args...>]
+  serverutils install-runner [--user|--global] [--force]
+    # Options: --name <bin> (default installs both 'serverutils' and 'solen')
+    #          --alias <bin> (install additional alias)
+  serverutils install-scripts [--user|--global] [--prefix su-] [--force]
+  serverutils uninstall-scripts [--user|--global] [--prefix su-]
+  serverutils meta <category/name|name|path> [--json]
+  serverutils banner
+  serverutils validate [--subset PATTERN[,PATTERN..]] [--strict] [--no-policy]
+  serverutils overview         # environment + scripts summary
+  serverutils tui              # force interactive menu
+  serverutils doctor
+  serverutils version
+  serverutils help
+
+Examples:
+  serverutils list
+  serverutils list --long
+  serverutils run docker/list-docker-info
+  serverutils run list-docker-info -- --help
+  serverutils search docker
+  serverutils install-runner --user
+  serverutils install-scripts --user --prefix su-
+
+What this tool can do:
+  - Inventory: docker info, network interfaces, ports, connectivity
+  - System maintenance: apt updates/upgrades, cleanup, log vacuuming
+  - Docker helpers: update a compose app with confirm and dry-run
+  - Backups & Health: scaffolds included; real implementations coming next
+
+Quick start:
+  - Browse scripts with summaries:   serverutils list --long
+  - See metadata for a script:       serverutils meta network/network-info --json
+  - Dry-run a script safely:         serverutils run docker/update-docker-compose-app -- --dry-run /srv/app
+  - Add runner to PATH:              serverutils install-runner --user
+    (installs both 'serverutils' and 'solen' commands by default)
+
+Top-level commands (TL;DR):
+  list         List available scripts with one-line summaries
+  search       Search by name, tags, or summary
+  run          Run a script (supports --dry-run, --json)
+  meta         Show SOLEN-META for a script
+  install-runner  Install 'solen' and 'serverutils' commands
+  install-scripts Install per-script shortcuts (symlinks)
+  validate     Sanity-check scripts' JSON/dry-run outputs
+  overview     Print environment and scripts summary
+  tui          Interactive menu UI (default on TTY when no args)
+EOF
+}
+
+main() {
+  local cmd="${1:-home}"; shift || true
+  case "$cmd" in
+    list) cmd_list "$@" ;;
+    run) cmd_run "$@" ;;
+    search) cmd_search "$@" ;;
+    overview) cmd_overview "$@" ;;
+    home) cmd_home "$@" ;;
+    tui) FORCE_TUI=1; cmd_home "$@" ;;
+    meta)
+      # print metadata for a given script
+      local json=0 q
+      while [[ $# -gt 0 ]]; do
+        case "$1" in --json) json=1; shift ;; *) q="$1"; shift;; esac
+      done
+      [[ -n "${q:-}" ]] || die "Usage: serverutils meta <category/name|name|path> [--json]"
+      local resolved
+      resolved="$(resolve_script_by_key_or_name "$q")"
+      if [[ -z "$resolved" ]]; then die "No script matching '$q'"; fi
+      # if multiple, just pick first for now
+      resolved="$(printf '%s\n' "$resolved" | head -n1)"
+      if [[ $json -eq 1 ]]; then
+        local rel="${resolved#${SCRIPTS_DIR}/}"; local cat="$(dirname "$rel")"; local name_noext="$(basename "$rel" ".sh")"
+        printf '{"category":"%s","name":"%s","key":"%s","path":"%s",%s}\n' "$cat" "$name_noext" "$cat/$name_noext" "$resolved" "$(meta_to_json_fields "$resolved")"
+      else
+        echo "$(script_key_for "$resolved")"
+        read_meta "$resolved"
+      fi
+      ;;
+    validate)
+      # options
+      local subset="" strict=0 no_policy=0
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --subset) subset="$2"; shift 2 ;;
+          --strict) strict=1; shift ;;
+          --no-policy) no_policy=1; shift ;;
+          *) echoerr "Unknown option: $1"; exit 2 ;;
+        esac
+      done
+      # build regex from subset (comma-separated globs)
+      local subset_re=""
+      if [[ -n "$subset" ]]; then
+        IFS=',' read -r -a pats <<< "$subset"
+        for p in "${pats[@]}"; do
+          # convert * to .*
+          p_re="${p//\*/.*}"
+          if [[ -n "$subset_re" ]]; then subset_re+="|$p_re"; else subset_re="$p_re"; fi
+        done
+      fi
+      local ok=0 warn=0 err=0
+      while IFS= read -r f; do
+        local key; key="$(script_key_for "$f")"
+        if [[ -n "$subset_re" ]] && ! echo "$key" | grep -Eq "$subset_re"; then continue; fi
+        # env for validation
+        local env_prefix="SOLEN_JSON=1 SOLEN_NOOP=1"
+        if [[ $no_policy -eq 1 ]]; then env_prefix+=" SOLEN_POLICY=/dev/null"; fi
+        # try both flags and env
+        set +e
+        out=$(eval "$env_prefix" "$f" --json --dry-run 2>/dev/null)
+        rc=$?
+        set -e
+        local status="ok" reason=""
+        if [[ $rc -ne 0 ]]; then
+          case "$rc" in
+            1) status="warn"; reason="user error (args?)" ;;
+            2) status="warn"; reason="deps missing" ;;
+            4) status="warn"; reason="policy refused" ;;
+            *) status="error"; reason="exit $rc" ;;
+          esac
+        else
+          # basic NDJSON checks
+          local lines total nonempty; total=0; nonempty=0
+          local missing_keys=0
+          while IFS= read -r line; do
+            total=$((total+1))
+            [[ -z "$line" ]] && continue
+            nonempty=$((nonempty+1))
+            # only consider JSON-looking lines
+            if ! echo "$line" | grep -q '^{'; then continue; fi
+            for k in '"status"' '"summary"' '"ts"' '"host"'; do
+              if ! echo "$line" | grep -q "$k"; then missing_keys=1; fi
+            done
+          done <<< "$out"
+          if [[ $nonempty -eq 0 ]]; then status="error"; reason="no output"; fi
+          if [[ $missing_keys -eq 1 && $status = ok ]]; then status="warn"; reason="missing keys"; fi
+          # verbs expectation for actions (only when rc==0)
+          local verbs; verbs=$(read_meta "$f" | sed -n 's/^verbs=//p' | tr ',' ' ')
+          if echo "$verbs" | grep -Eq '\b(fix|ensure|update|upgrade|backup|restore)\b'; then
+            if ! echo "$out" | grep -q '"actions"'; then
+              if [[ $strict -eq 1 ]]; then status="warn"; reason="no actions"; fi
+            fi
+          fi
+        fi
+        case "$status" in
+          ok) echo "$key -> ok"; ok=$((ok+1)) ;;
+          warn) echo "$key -> warn ($reason)"; warn=$((warn+1)) ;;
+          error) echo "$key -> error ($reason)"; err=$((err+1)) ;;
+        esac
+      done < <(find_all_scripts)
+      echo "---"
+      echo "ok: $ok, warn: $warn, error: $err"
+      if [[ $err -gt 0 ]]; then exit 1
+      elif [[ $warn -gt 0 ]]; then exit 3
+      else exit 0
+      fi
+      ;;
+    banner)
+      if [[ -f "${ROOT_DIR}/asciiart.ascii" ]]; then
+        cat "${ROOT_DIR}/asciiart.ascii"
+        echo
+      else
+        echowarn "asciiart.ascii not found in ${ROOT_DIR}"
+      fi
+      ;;
+    install-runner) cmd_install_runner "$@" ;;
+    install-scripts) cmd_install_scripts "$@" ;;
+    uninstall-scripts) cmd_uninstall_scripts "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    version) echo "$VERSION" ;;
+    help|-h|--help) show_help ;;
+    *) echoerr "Unknown command: $cmd"; echo; show_help; exit 2 ;;
+  esac
+}
+
+main "$@"

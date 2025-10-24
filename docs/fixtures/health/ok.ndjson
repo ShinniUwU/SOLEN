@@ -1,0 +1,2 @@
+{"status":"ok","summary":"health OK: disk 42%, load 0.35/core, services green","ts":"2025-01-01T00:00:00Z","host":"host","actions":[],"disk_root_pct":42,"load15_per_core":0.35,"mem_pressure_pct":22,"unhealthy_containers":0,"failed_services":0}
+

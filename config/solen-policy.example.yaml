@@ -1,0 +1,31 @@
+# Example SOLEN policy file
+# Copy this to /etc/solen/policy.yaml or ./.serverutils/policy.yaml
+
+version: 1
+
+allow:
+  services:
+    restart: ["sshd", "docker", "cron"]
+    enable: ["sshd", "docker", "cron"]
+  paths:
+    prune:
+      - "/var/log"
+      - "/tmp"
+  tokens:
+    - docker-introspection
+    - port-enumeration
+    - external-ping
+    - backup-path:/var/backups/solen
+    - backup-profile:etc
+    - package-upgrade
+
+deny:
+  services:
+    restart: []
+    enable: []
+  paths:
+    prune: []
+
+notes:
+  - "Refuse actions not allowed here with exit code 4"
+  - "Use SOLEN_ASSUME_YES=1 or --yes to confirm destructive operations"

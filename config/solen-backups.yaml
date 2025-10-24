@@ -1,0 +1,33 @@
+# SOLEN Backups profiles (scaffold)
+
+defaults:
+  dest: /var/backups/solen
+  retention_days: 7
+  exclude:
+    - "*.cache/**"
+
+profiles:
+  - name: etc
+    tags: [etc]
+    sources:
+      - path: /etc
+        exclude: ["ssl/certs/*.pem"]
+  - name: lxc-configs
+    tags: [lxc]
+    sources:
+      - path: /etc/pve/lxc
+      - path: /etc/pve/storage.cfg
+      - path: /etc/subuid
+      - path: /etc/subgid
+  - name: jellyfin-meta
+    tags: [media,jellyfin]
+    sources:
+      - path: /var/lib/jellyfin
+        exclude: ["transcodes/**"]
+  - name: mc-world
+    tags: [mc]
+    sources:
+      - path: /opt/mc_forge_1_20_1/world
+      - path: /opt/mc_forge_1_20_1/server.properties
+      - path: /opt/mc_forge_1_20_1/mods
+

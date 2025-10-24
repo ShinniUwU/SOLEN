@@ -90,3 +90,6 @@ Thumbs.db
 # secrets.yml
 # *.pem
 # *.key
+
+# ServerUtils runner state
+.serverutils/
