@@ -1,0 +1,10 @@
+# SOLEN shell (bash) — optional, guarded include
+# Copy to ~/.config/solen/bashrc.solened and add to ~/.bashrc between:
+#   # SOLEN: begin
+#   source "$HOME/.config/solen/bashrc.solened"
+#   # SOLEN: end
+
+# Example: aliases
+alias ls='ls --color=auto'
+alias ll='ls -lah'
+

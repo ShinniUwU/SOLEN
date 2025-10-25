@@ -21,6 +21,17 @@ allow:
     - ssh-config-apply
     - package-upgrade
 
+# examples for granular policy ideas (non-enforced; for documentation)
+# allow:
+#   - firewall-apply
+#   - firewall:egress:deny
+#   - ssh-config-apply
+#   - ssh:settings:maxAuthTries:3
+#   - backup-profile:etc
+#   - backup-path:/var/backups/solen
+# deny:
+#   - firewall:ports:0-21,23,25,3389
+
 deny:
   services:
     restart: []

@@ -1,0 +1,7 @@
+# label;unit-or-process
+SSHD;ssh.service
+NGINX;nginx
+Docker;docker.service
+Podman;podman.service
+Snap;snapd
+

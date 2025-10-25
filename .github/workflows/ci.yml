@@ -76,6 +76,32 @@ jobs:
         run: |
           bash ci/validate-json.sh
 
+  motd-noninteractive-smoke:
+    name: MOTD Non-Interactive Smoke (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ 'debian:stable-slim', 'fedora:latest' ]
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps (Debian)
+        if: startsWith(matrix.image, 'debian')
+        run: |
+          apt-get update -y
+          DEBIAN_FRONTEND=noninteractive apt-get install -y bash iproute2 iputils-ping procps coreutils findutils gawk sed
+      - name: Install deps (Fedora)
+        if: startsWith(matrix.image, 'fedora')
+        run: |
+          dnf -y install bash iproute iputils procps-ng coreutils findutils gawk sed
+      - name: Smoke (should be silent in non-interactive)
+        run: |
+          export SOLEN_NO_TUI=1 SOLEN_PLAIN=1 TERM=dumb
+          out=$(bash Scripts/motd/solen-motd.sh --full || true)
+          if [ -n "$out" ]; then echo "Unexpected MOTD output in non-interactive mode:"; echo "$out"; exit 1; fi
+
   package-deb:
     name: Build .deb (on tag/release)
     if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')

@@ -218,7 +218,7 @@ fi
 changed=0
 failed=0
 backup_ipt=""; backup_ip6t=""; backup_nft=""
-if [[ "$chosen" == "iptables" ]]; then
+if [[ "$chosen" == "iptables" || "$chosen" == "ufw" ]]; then
   backup_ipt="/tmp/solen.iptables.$$.save"; sudo iptables-save >"$backup_ipt" || true
   if command -v ip6tables >/dev/null 2>&1; then backup_ip6t="/tmp/solen.ip6tables.$$.save"; sudo ip6tables-save >"$backup_ip6t" || true; fi
 elif [[ "$chosen" == "nftables" ]]; then
@@ -238,6 +238,11 @@ if [[ $failed -eq 1 ]]; then
   if [[ "$chosen" == "iptables" ]]; then
     [[ -f "$backup_ipt" ]] && sudo iptables-restore <"$backup_ipt" || true
     [[ -n "$backup_ip6t" && -f "$backup_ip6t" ]] && sudo ip6tables-restore <"$backup_ip6t" || true
+  elif [[ "$chosen" == "ufw" ]]; then
+    # Restore low-level tables and disable ufw
+    [[ -f "$backup_ipt" ]] && sudo iptables-restore <"$backup_ipt" || true
+    [[ -n "$backup_ip6t" && -f "$backup_ip6t" ]] && sudo ip6tables-restore <"$backup_ip6t" || true
+    sudo ufw --force disable >/dev/null 2>&1 || true
   elif [[ "$chosen" == "nftables" ]]; then
     [[ -f "$backup_nft" ]] && sudo nft -f "$backup_nft" || true
   fi

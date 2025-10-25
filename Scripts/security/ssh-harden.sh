@@ -47,6 +47,7 @@ do_restart=0
 skip_preflight=0
 max_auth_tries=""
 permit_empty=""
+do_rollback=0
 
 while [[ $# -gt 0 ]]; do
   if solen_parse_common_flag "$1"; then shift; continue; fi
@@ -58,6 +59,7 @@ while [[ $# -gt 0 ]]; do
     --max-auth-tries) max_auth_tries="${2:-}"; shift 2 ;;
     --permit-empty-passwords) permit_empty="${2:-no}"; shift 2 ;;
     --skip-preflight) skip_preflight=1; shift ;;
+    --rollback) do_rollback=1; shift ;;
     --restart) do_restart=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
@@ -70,6 +72,46 @@ if ! solen_policy_allows_token "ssh-config-apply"; then
   msg="policy refused: ssh-config-apply"
   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
   exit 4
+fi
+
+# Rollback: restore latest backup and exit
+if [[ $do_rollback -eq 1 ]]; then
+  latest="$(ls -1t /etc/ssh/sshd_config.*.bak 2>/dev/null | head -n1 || true)"
+  if [[ -z "$latest" ]]; then
+    solen_err "no backup files found to rollback"
+    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "no backup for rollback" "" "\"code\":2"
+    exit 2
+  fi
+  actions=$(cat <<A
+sudo install -m 0644 "$latest" "/etc/ssh/sshd_config"
+if systemctl status ssh >/dev/null 2>&1; then sudo systemctl reload ssh || sudo systemctl restart ssh; else sudo systemctl reload sshd || sudo systemctl restart sshd; fi
+A
+  )
+  if [[ $SOLEN_FLAG_DRYRUN -eq 1 || $SOLEN_FLAG_YES -eq 0 ]]; then
+    if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+      solen_json_record ok "dry-run: rollback to $(basename "$latest")" "$actions" "\"would_change\":1"
+    else
+      solen_info "dry-run enforced (use --yes to apply)"
+      printf '%s' "$actions"
+    fi
+    exit 0
+  fi
+  changed=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    solen_info "$line"
+    set +e
+    bash -c "$line"
+    rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed rc=$rc: $line"; fi
+  done <<< "$actions"
+  if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+    solen_json_record ok "rollback applied" "$actions" "\"changed\":${changed},\"rolled_back\":true"
+  else
+    solen_ok "rollback applied (changed=${changed})"
+  fi
+  exit 0
 fi
 
 conf="/etc/ssh/sshd_config"

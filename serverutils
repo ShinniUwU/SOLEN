@@ -837,6 +837,10 @@ E
 main() {
   local cmd="${1:-home}"; shift || true
   case "$cmd" in
+    install)
+      # wrapper to run installer script with flags
+      cmd_run install/install -- "$@"
+      ;;
     list) cmd_list "$@" ;;
     run) cmd_run "$@" ;;
     search) cmd_search "$@" ;;

@@ -22,6 +22,7 @@ usage() {
 Usage:
   $(basename "$0") run --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
   $(basename "$0") prune --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
+  $(basename "$0") verify --profile <name> [--dest <path>] [--json]
 
 Environment:
   SOLEN_BACKUPS_CONFIG   Path to profiles YAML (default: config/solen-backups.yaml)
@@ -112,7 +113,7 @@ if ! solen_policy_allows_token "backup-path:${dest}"; then
 fi
 
 # Enforce dry-run by default (safety); require --yes for real changes
-if [[ "$cmd" =~ ^(run|prune)$ ]]; then
+if [[ "$cmd" =~ ^(run|prune|verify)$ ]]; then
   if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 0 && ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
     SOLEN_FLAG_DRYRUN=1
     if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
@@ -362,6 +363,38 @@ elif [[ "$cmd" == "prune" ]]; then
     fi
     exit 0
   fi
+elif [[ "$cmd" == "verify" ]]; then
+  # Best-effort verification: list snapshots for each source and report latest timestamp
+  if [[ $SOLEN_FLAG_JSON -ne 1 ]]; then
+    solen_info "verifying snapshots for ${#SRC_PATHS[@]} source(s)"
+  fi
+  if ! command -v kopia >/dev/null 2>&1; then
+    solen_err "kopia not installed"
+    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "kopia not installed" "" "\"code\":2"
+    exit 2
+  fi
+  # Connect repo if needed (same as run planning, without create)
+  SUDO=""; if [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]]; then SUDO="sudo -E"; fi
+  if [[ "$repo_kind" == filesystem ]]; then
+    $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect filesystem --path "$repo_path" >/dev/null 2>&1 || true
+  else
+    region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"; endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
+    env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect s3 --bucket "${SOLEN_KOPIA_S3_BUCKET}" --prefix "${SOLEN_KOPIA_S3_PREFIX:-solen}${repo_per_profile:+/${profile}}" --region "$region"${endpoint_opt} >/dev/null 2>&1 || true
+  fi
+  ok=0; total=0; actions=""
+  for src in "${SRC_PATHS[@]}"; do
+    total=$((total+1))
+    latest=$(env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" --json 2>/dev/null | jq -r '.[0].startTime' 2>/dev/null || true)
+    if [[ -n "$latest" && "$latest" != "null" ]]; then ok=$((ok+1)); actions+=$"OK  $src -> $latest\n"; else actions+=$"MISS $src\n"; fi
+  done
+  summary="verify ${ok}/${total} sources have snapshots"
+  if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+    solen_json_record ok "$summary" "$actions" "\"metrics\":{\"sources\":${total},\"ok\":${ok}}"
+  else
+    printf '%s\n' "$actions"
+    solen_ok "$summary"
+  fi
+  exit 0
 else
   solen_err "unknown subcommand: $cmd"
   usage

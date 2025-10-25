@@ -15,14 +15,21 @@ A calm, minimal system summary with a European‑industrial vibe, aligned with S
 - Disk: `/` and `/boot` used / total (with bar)
 - Network: default interface, IPv4, IPv6 if present (degrades if `ip` missing)
 
+Optional panels (future‑friendly; off unless configured):
+- Services: read labels and units/processes from `~/.config/solen/services` or `/etc/solen/services` (format: `Label;unit|process`).
+- Containers: Docker/Podman status (counts; top names). Skips gracefully if tools unavailable.
+- Updates: count of available package updates (apt/dnf/pacman/zypper).
+
 ## Usage
 
 Run directly:
 
 ```
 Scripts/motd/solen-motd.sh
-Scripts/motd/solen-motd.sh --plain   # no colors/emojis
-Scripts/motd/solen-motd.sh --json    # one-line JSON (no other output)
+Scripts/motd/solen-motd.sh --plain             # no colors/emojis
+Scripts/motd/solen-motd.sh --json              # one-line JSON (no other output)
+Scripts/motd/solen-motd.sh --quiet             # single concise line (host, load, mem, updates)
+Scripts/motd/solen-motd.sh --full              # render optional panels if available
 ```
 
 From the SOLEN runner:
@@ -49,6 +56,17 @@ Keep it modular: do not paste the script inline. Add a tiny wrapper that only ru
 Reload: `exec $SHELL`. Remove the one line to disable.
 
 Tip: `serverutils setup-motd` prints the above snippet for copy‑paste.
+
+Non‑interactive behavior
+- If SOLEN_NO_TUI=1 or TERM=dumb or not a TTY, pretty output is suppressed.
+- In non‑interactive contexts, nothing is printed unless `--json` is passed.
+
+Data collector
+- `Scripts/motd/collect.sh` emits a single JSON line with host metrics suitable for dashboards or piping.
+
+Services configuration
+- Example at `config/motd/services.example`. Copy to `~/.config/solen/services` or `/etc/solen/services` and adjust.
+- Format: `Label;unit-or-process` (e.g., `NGINX;nginx`, `SSHD;ssh.service`).
 
 ## Toggling
 

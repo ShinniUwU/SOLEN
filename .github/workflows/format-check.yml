@@ -3,6 +3,7 @@ name: Check Shell Script Formatting 🎨
 on:
   pull_request:
     branches: [ main ]
+<<<<<<< HEAD
     paths:
       - 'serverutils'
       - 'Scripts/**'
@@ -13,6 +14,20 @@ on:
       - 'serverutils'
       - 'Scripts/**'
       - '.editorconfig'
+=======
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.md'
+  push:
+    branches: [ main ]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.md'
+>>>>>>> 2366f52 (feat(motd,install,security,backups,ci): MOTD panels, cross-distro installer, backup verify, UFW+SSH rollback quiter CI)
 
 permissions:
   contents: read
