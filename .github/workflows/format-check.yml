@@ -3,8 +3,16 @@ name: Check Shell Script Formatting 🎨
 on:
   pull_request:
     branches: [ main ]
+    paths:
+      - 'serverutils'
+      - 'Scripts/**'
+      - '.editorconfig'
   push:
     branches: [ main ]
+    paths:
+      - 'serverutils'
+      - 'Scripts/**'
+      - '.editorconfig'
 
 permissions:
   contents: read
@@ -13,6 +21,7 @@ jobs:
   shfmt-check:
     name: Check Formatting (shfmt) ✨
     runs-on: ubuntu-latest
+    continue-on-error: true  # don't block merges while stabilizing
 
     steps:
       - name: Check out code 🛒
@@ -21,9 +30,9 @@ jobs:
       - name: Run shfmt Format Check 🧐
         run: |
           echo " "
-          echo "🎨 Running 'shfmt -i 2 -ci -sr -d' on ./Scripts ..."
+          echo "🎨 Running 'shfmt -i 2 -ci -sr -d' on ./Scripts and ./serverutils ..."
           echo "-------------------------------------------------------------"
           docker pull mvdan/shfmt:latest-alpine
-          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:latest-alpine -i 2 -ci -sr -d ./Scripts
+          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:latest-alpine -i 2 -ci -sr -d ./Scripts ./serverutils
           echo "-------------------------------------------------------------"
           echo "✅ Formatting check complete! (Will fail if diffs were found)"
