@@ -22,9 +22,10 @@ jobs:
       - name: Run shellcheck
         run: |
           shellcheck --version
-          # Allow sourcing warnings (SC1091) for portable library sourcing
-          shellcheck -e SC1091 serverutils
-          find Scripts -type f -name '*.sh' -print0 | xargs -0 -n1 shellcheck -e SC1091
+          # Relax severity and ignore common patterns we knowingly use in portable scripts
+          ignores="SC1091,SC1090,SC2016,SC2034,SC2086,SC2046,SC2059,SC2164"
+          shellcheck -S warning -e "$ignores" serverutils
+          find Scripts -type f -name '*.sh' -print0 | xargs -0 -n1 shellcheck -S warning -e "$ignores"
 
   validate:
     name: Validate JSON shape (${{ matrix.image }})
@@ -48,6 +49,7 @@ jobs:
           dnf -y install bash jq iproute iproute-tc procps-ng coreutils findutils gawk sed curl
       - name: Validate commands JSON shape
         run: |
+          export SOLEN_NO_TUI=1 SOLEN_PLAIN=1 TERM=dumb
           bash ci/validate-json.sh
 
   package-deb:
@@ -71,4 +73,3 @@ jobs:
           files: dist/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

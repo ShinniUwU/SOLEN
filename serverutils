@@ -791,6 +791,15 @@ EOF
 cmd_setup_motd() {
   echoinfo "Enable SOLEN MOTD in interactive shells (no edits performed)"
   echo
+  # Suggest target based on current shell
+  cur_shell="${SHELL##*/}"
+  case "$cur_shell" in
+    zsh) suggest="~/.zshrc" ;;
+    fish) suggest="~/.config/fish/config.fish" ;;
+    *) suggest="~/.bashrc" ;;
+  esac
+  echoinfo "Detected shell: ${cur_shell} (suggested file: ${suggest})"
+  echo
   echo "Bash — add to ~/.bashrc:"
   echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
   echo

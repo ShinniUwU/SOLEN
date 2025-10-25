@@ -11,7 +11,7 @@ skip=0
 check_cmd() {
   local key="$1"; local expected_op="$2"
   set +e
-  out=$(./serverutils run "$key" -- --json 2>/dev/null)
+  out=$(SOLEN_NO_TUI=1 SOLEN_PLAIN=1 TERM=dumb ./serverutils run "$key" -- --json 2>/dev/null)
   rc=$?
   set -e
   # Filter JSON lines only
