@@ -1,0 +1,14 @@
+[Unit]
+Description=SOLEN (system) Kopia maintenance (quick)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=SOLEN_PLAIN=1
+EnvironmentFile=-/etc/solen/backups.env
+ExecStart=/usr/local/bin/serverutils run backups/maintenance -- --quick --json
+ExecStartPre=/usr/bin/env mkdir -p /var/log/solen
+StandardOutput=append:/var/log/solen/kopia-maintenance.ndjson
+StandardError=journal
+

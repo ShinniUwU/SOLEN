@@ -36,6 +36,7 @@ Notes:
   - Uses Kopia (filesystem repo by default under dest/kopia-repo). If Kopia not installed, acts as scaffold.
   - For S3, set env: SOLEN_KOPIA_S3_BUCKET, SOLEN_KOPIA_S3_REGION, [SOLEN_KOPIA_S3_PREFIX], [SOLEN_KOPIA_S3_ENDPOINT]
   - Repo password: set KOPIA_PASSWORD or KOPIA_PASSWORD_FILE (defaults to ~/.serverutils/kopia-password)
+  - Optional repo-per-profile: set SOLEN_KOPIA_REPO_PER_PROFILE=1 to use per-profile repo paths
 EOF
 }
 
@@ -45,6 +46,7 @@ shift || true
 profile=""
 dest_override="${SOLEN_BACKUPS_DEST:-}"
 ret_days="${SOLEN_BACKUPS_RETENTION_DAYS:-}"
+repo_per_profile="${SOLEN_KOPIA_REPO_PER_PROFILE:-0}"
 while [[ $# -gt 0 ]]; do
   if solen_parse_common_flag "$1"; then
     shift
@@ -192,7 +194,15 @@ repo_create=${SOLEN_KOPIA_CREATE:-1}
 extra_env=""
 if [[ -n "${SOLEN_KOPIA_S3_BUCKET:-}" ]]; then
   repo_kind="s3"
-  repo_path="s3://${SOLEN_KOPIA_S3_BUCKET}/${SOLEN_KOPIA_S3_PREFIX:-solen}"
+  if [[ "$repo_per_profile" == "1" ]]; then
+    repo_path="s3://${SOLEN_KOPIA_S3_BUCKET}/${SOLEN_KOPIA_S3_PREFIX:-solen}/${profile}"
+  else
+    repo_path="s3://${SOLEN_KOPIA_S3_BUCKET}/${SOLEN_KOPIA_S3_PREFIX:-solen}"
+  fi
+else
+  if [[ "$repo_per_profile" == "1" ]]; then
+    repo_path="${dest%/}/kopia-repo-${profile}"
+  fi
 fi
 
 # Password resolution
@@ -283,6 +293,7 @@ if [[ "$cmd" == "run" ]]; then
     fi
     # Execute planned actions line-by-line
     changed=0
+    verified=0
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       # echo command lines and skip comments
@@ -297,11 +308,24 @@ if [[ "$cmd" == "run" ]]; then
       set -e
       if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
     done <<< "$actions_list"
+    # Post-run: verify snapshots exist (best-effort)
+    for src in "${SRC_PATHS[@]}"; do
+      set +e
+      if [[ "$repo_kind" == "filesystem" && "$repo_path" == /var/* ]]; then
+        SUDO="sudo -E"
+      else
+        SUDO=""
+      fi
+      $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" >/dev/null 2>&1
+      rc=$?
+      set -e
+      if [[ $rc -eq 0 ]]; then verified=$((verified+1)); fi
+    done
     summary="backup complete (kopia)"
     if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
-      solen_json_record ok "$summary" "$actions_list" "\"metrics\":{\"sources\":${#SRC_PATHS[@]},\"changed\":${changed}}"
+      solen_json_record ok "$summary" "$actions_list" "\"metrics\":{\"sources\":${#SRC_PATHS[@]},\"changed\":${changed},\"verified\":${verified}}"
     else
-      solen_ok "$summary (sources=${#SRC_PATHS[@]})"
+      solen_ok "$summary (sources=${#SRC_PATHS[@]}, verified=${verified})"
     fi
     exit 0
   fi

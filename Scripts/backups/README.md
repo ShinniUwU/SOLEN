@@ -10,6 +10,7 @@ Key script:
     - Filesystem repo at `<dest>/kopia-repo` (default dest `/var/backups/solen`).
     - Optional S3: set `SOLEN_KOPIA_S3_BUCKET`, `SOLEN_KOPIA_S3_REGION`, and optional `SOLEN_KOPIA_S3_PREFIX`, `SOLEN_KOPIA_S3_ENDPOINT`.
     - Repo password via `KOPIA_PASSWORD` or `KOPIA_PASSWORD_FILE` (defaults to `~/.serverutils/kopia-password`).
+    - Optional repo-per-profile: set `SOLEN_KOPIA_REPO_PER_PROFILE=1` to isolate each profile to its own repo.
   - Honors `--dry-run`, `--yes`, and policy tokens `backup-profile:<name>` and `backup-path:<dest>`.
 
 Examples:
@@ -26,6 +27,11 @@ export SOLEN_KOPIA_S3_BUCKET=my-bucket
 export SOLEN_KOPIA_S3_REGION=us-east-1
 export SOLEN_KOPIA_S3_PREFIX=solen-prod
 export KOPIA_PASSWORD_FILE=~/.serverutils/kopia-password
+# AWS credentials (one of):
+export AWS_ACCESS_KEY_ID=AKIAXXXX
+export AWS_SECRET_ACCESS_KEY=xxxx
+# or use a shared credentials file
+export AWS_SHARED_CREDENTIALS_FILE=~/.aws/credentials
 ../../serverutils run backups/run -- run --profile etc --json --yes
 
 # Prune/maintenance (Kopia maintenance)
@@ -52,4 +58,32 @@ Schedule maintenance:
 ./serverutils install-units --user
 systemctl --user daemon-reload
 systemctl --user enable --now solen-kopia-maintenance.timer
+
+Environment for S3 (units):
+
+- Put credentials and settings in `~/.config/solen/backups.env` (user) or `/etc/solen/backups.env` (system), e.g.:
+
+```
+AWS_ACCESS_KEY_ID=AKIAXXXX
+AWS_SECRET_ACCESS_KEY=xxxx
+SOLEN_KOPIA_S3_BUCKET=my-bucket
+SOLEN_KOPIA_S3_REGION=us-east-1
+SOLEN_KOPIA_S3_PREFIX=solen-prod
+```
+
+Units include `EnvironmentFile` entries for these paths.
+
+System-wide units:
+
+- Provided `solen-backups-system@.service`/`.timer` and `solen-kopia-maintenance-system.service`/`.timer` append logs to `/var/log/solen/*.ndjson`.
+- Ensure the runner is installed globally: `sudo ./serverutils install-runner --global`.
+- Enable timers:
+  - `sudo cp systemd/*.service systemd/*.timer /etc/systemd/system/` (or use `serverutils install-units --global`)
+  - `sudo systemctl daemon-reload`
+  - `sudo systemctl enable --now solen-kopia-maintenance-system.timer`
+  - `sudo systemctl enable --now solen-backups-system@etc.timer`
+
+Log rotation:
+
+- See `docs/LOGGING.md` for a ready logrotate snippet that rotates `/var/log/solen/*.ndjson` and the audit log.
 ```

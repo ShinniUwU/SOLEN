@@ -1,24 +1,24 @@
-# Code of Conduct - ServerUtils
+# Code of Conduct - SOLEN
 
 ## Our Goal
 
-We want the ServerUtils project to be a welcoming and friendly place for everyone interested in contributing or using these scripts. We encourage collaboration and learning.
+We want the SOLEN project to be a welcoming and friendly place for everyone interested in contributing or using these scripts. We encourage collaboration and learning.
 
 ## Expected Behavior
 
 To help achieve this, we ask everyone interacting with the project (on GitHub Issues, Pull Requests, etc.) to:
 
-* **Be Respectful:** Treat others with courtesy. Different opinions and experience levels are welcome.
-* **Be Kind:** Assume good intent, offer constructive feedback politely, and be considerate in your interactions.
-* **Be Collaborative:** Work together constructively. Help each other out.
+- **Be Respectful:** Treat others with courtesy. Different opinions and experience levels are welcome.
+- **Be Kind:** Assume good intent, offer constructive feedback politely, and be considerate in your interactions.
+- **Be Collaborative:** Work together constructively. Help each other out.
 
 ## Unacceptable Behavior
 
 Behavior that is disrespectful, discriminatory, harassing, or otherwise unwelcoming will not be tolerated. This includes, but is not limited to:
 
-* Offensive comments related to personal characteristics.
-* Insults, trolling, or personal attacks.
-* Harassment of any kind.
+- Offensive comments related to personal characteristics.
+- Insults, trolling, or personal attacks.
+- Harassment of any kind.
 
 ## Reporting Issues
 
@@ -26,4 +26,4 @@ If you experience or witness behavior that violates this Code of Conduct, please
 
 ## Thanks!
 
-Thank you for helping make ServerUtils a positive environment.
+Thank you for helping make SOLEN a positive environment.

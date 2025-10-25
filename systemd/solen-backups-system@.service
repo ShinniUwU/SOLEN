@@ -1,0 +1,14 @@
+[Unit]
+Description=SOLEN (system) backup profile %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=SOLEN_PLAIN=1
+EnvironmentFile=-/etc/solen/backups.env
+ExecStart=/usr/local/bin/serverutils run backups/run -- run --profile %i --json
+ExecStartPre=/usr/bin/env mkdir -p /var/log/solen
+StandardOutput=append:/var/log/solen/backups-%i.ndjson
+StandardError=journal
+

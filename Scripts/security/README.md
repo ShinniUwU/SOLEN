@@ -15,10 +15,12 @@ Security scripts to assess and apply common hardening.
 - `firewall-apply.sh`
   - Apply safe defaults via ufw (preferred) or nftables/iptables, allow SSH and extra ports.
   - Supports `--service web|http|https|dns|wireguard` to quickly open common ports.
+  - Egress control via `--egress allow|deny`. With nftables, use `--persist` to write `/etc/nftables.conf` and apply.
   - Honors `--dry-run` and requires policy token `firewall-apply`.
 
 - `ssh-harden.sh`
   - Harden `sshd_config`: disable root login and password auth by default; optional custom port and groups.
+  - Options: `--max-auth-tries`, `--permit-empty-passwords`, `--skip-preflight` (bypass safe key check).
   - Validates with `sshd -t` before applying; supports `--restart` (policy-gated).
 
 Examples:
@@ -29,3 +31,14 @@ Examples:
 ../../serverutils run security/firewall-apply -- --ssh-port 22 --allow tcp:80 --allow tcp:443 --dry-run
 ../../serverutils run security/ssh-harden -- --permit-root no --password-auth no --restart --dry-run
 ```
+
+Safe SSH harden checklist:
+
+- Ensure at least one admin user has a non-empty `~/.ssh/authorized_keys`.
+- Verify you can log in with SSH keys before disabling passwords.
+- Keep a root session open while applying changes and test a new session.
+
+Persisting nftables:
+
+- Use `--persist` to write `/etc/nftables.conf` and apply atomically.
+- For system boot, ensure `nftables` service is enabled (Debian/Ubuntu: `sudo systemctl enable --now nftables`).

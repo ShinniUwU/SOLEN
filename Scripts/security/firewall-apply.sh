@@ -19,7 +19,9 @@ solen_init_flags
 
 usage() {
   cat << EOF
-Usage: $(basename "$0") [--ssh-port N] [--allow <spec>]... [--service <name>]... [--mode auto|ufw|nftables|iptables] [--dry-run] [--json] [--yes]
+Usage: $(basename "$0") [--ssh-port N] [--allow <spec>]... [--service <name>]... \
+                       [--egress allow|deny] [--persist] [--mode auto|ufw|nftables|iptables] \
+                       [--dry-run] [--json] [--yes]
 
 Configures a basic inbound-deny firewall with explicit allows.
 
@@ -36,6 +38,8 @@ Options:
                            - wireguard  (udp:51820)
                            - http       (tcp:80)
                            - https      (tcp:443)
+  --egress MODE           Default outgoing policy: allow (default) or deny
+  --persist               For nftables: also write persistent config to /etc/nftables.conf
   --mode M                auto|ufw|nftables|iptables (default: auto; ufw preferred)
 
 Safety:
@@ -47,6 +51,8 @@ EOF
 
 ssh_port=22
 mode="auto"
+egress="allow"
+persist=0
 declare -a allows=()
 declare -a services=()
 
@@ -57,6 +63,8 @@ while [[ $# -gt 0 ]]; do
     --allow) allows+=("${2:-}"); shift 2 ;;
     --mode) mode="${2:-auto}"; shift 2 ;;
     --service) services+=("${2:-}"); shift 2 ;;
+    --egress) egress="${2:-allow}"; shift 2 ;;
+    --persist) persist=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
     -*) solen_err "unknown option: $1"; usage; exit 1 ;;
@@ -121,7 +129,11 @@ fi
 actions=""
 if [[ "$chosen" == "ufw" ]]; then
   actions+=$'sudo ufw default deny incoming\n'
-  actions+=$'sudo ufw default allow outgoing\n'
+  if [[ "$egress" == "deny" ]]; then
+    actions+=$'sudo ufw default deny outgoing\n'
+  else
+    actions+=$'sudo ufw default allow outgoing\n'
+  fi
   actions+=$"sudo ufw allow ${ssh_port}/tcp\n"
   for a in "${norm_allows[@]:-}"; do
     proto="${a%%:*}"; port="${a##*:}"
@@ -129,7 +141,7 @@ if [[ "$chosen" == "ufw" ]]; then
   done
   actions+=$'sudo ufw --force enable\n'
 elif [[ "$chosen" == "nftables" ]]; then
-  # Ephemeral rules (idempotent-ish). Safer than overwriting system config.
+  # Build ephemeral rules, and optionally a persistent /etc/nftables.conf
   actions+=$'sudo nft list tables || true\n'
   actions+=$'sudo nft create table inet filter 2>/dev/null || true\n'
   actions+=$'sudo nft list chain inet filter input >/dev/null 2>&1 || sudo nft add chain inet filter input { type filter hook input priority 0; policy drop; }\n'
@@ -140,6 +152,26 @@ elif [[ "$chosen" == "nftables" ]]; then
     proto="${a%%:*}"; port="${a##*:}"
     actions+=$"sudo nft add rule inet filter input ${proto} dport ${port} accept 2>/dev/null || true\n"
   done
+  # Egress
+  actions+=$'sudo nft list chain inet filter output >/dev/null 2>&1 || sudo nft add chain inet filter output { type filter hook output priority 0; policy accept; }\n'
+  if [[ "$egress" == "deny" ]]; then
+    actions+=$'sudo nft add rule inet filter output ct state established,related accept 2>/dev/null || true\n'
+    actions+=$'sudo nft add rule inet filter output oif lo accept 2>/dev/null || true\n'
+    actions+=$'sudo nft chain inet filter output { policy drop; }\n'
+  else
+    actions+=$'sudo nft chain inet filter output { policy accept; }\n'
+  fi
+  if [[ $persist -eq 1 ]]; then
+    ts=$(date -u +%Y%m%d-%H%M%S)
+    nft_conf="# /etc/nftables.conf managed by SOLEN\nflush ruleset\n\n table inet filter {\n  chain input { type filter hook input priority 0; policy drop;\n    ct state established,related accept\n    iif lo accept\n    tcp dport ${ssh_port} accept\n"
+    for a in ${norm_allows[@]:-}; do nft_conf+=$"    ${a%%:*} dport ${a##*:} accept\n"; done
+    nft_conf+=$"  }\n  chain output { type filter hook output priority 0; policy $([[ $egress == deny ]] && echo drop || echo accept);\n    ct state established,related accept\n    oif lo accept\n  }\n }\n"
+    actions+=$"sudo /usr/bin/env sh -c 'nft list ruleset > /etc/nftables.backup-${ts}'\n"
+    actions+=$"sudo /usr/bin/env sh -c 'cat > /tmp/solen.nft.conf <<\"EOF\"\n${nft_conf}EOF'\n"
+    actions+=$'sudo install -m 0644 /tmp/solen.nft.conf /etc/nftables.conf\n'
+    actions+=$'sudo nft -f /etc/nftables.conf\n'
+    actions+=$'rm -f /tmp/solen.nft.conf\n'
+  fi
 elif [[ "$chosen" == "iptables" ]]; then
   # Conservative: add explicit accepts first, do not change default policies unless --yes and explicit.
   actions+=$'sudo iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
@@ -149,7 +181,25 @@ elif [[ "$chosen" == "iptables" ]]; then
     proto="${a%%:*}"; port="${a##*:}"
     actions+=$"sudo iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p ${proto} --dport ${port} -j ACCEPT\n"
   done
-  actions+=$'# NOTE: default policy changes are intentionally omitted here to avoid lockouts.\n'
+  # IPv6 mirror rules if ip6tables is present
+  actions+=$'command -v ip6tables >/dev/null 2>&1 || exit 0\n'
+  actions+=$'sudo ip6tables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
+  actions+=$'sudo ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -i lo -j ACCEPT\n'
+  actions+=$"sudo ip6tables -C INPUT -p tcp --dport ${ssh_port} -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -p tcp --dport ${ssh_port} -j ACCEPT\n"
+  for a in "${norm_allows[@]:-}"; do
+    proto="${a%%:*}"; port="${a##*:}"
+    actions+=$"sudo ip6tables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -p ${proto} --dport ${port} -j ACCEPT\n"
+  done
+  if [[ "$egress" == "deny" ]]; then
+    actions+=$'sudo iptables -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
+    actions+=$'sudo iptables -C OUTPUT -o lo -j ACCEPT 2>/dev/null || sudo iptables -A OUTPUT -o lo -j ACCEPT\n'
+    actions+=$'sudo iptables -P OUTPUT DROP\n'
+    actions+=$'command -v ip6tables >/dev/null 2>&1 || exit 0\n'
+    actions+=$'sudo ip6tables -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
+    actions+=$'sudo ip6tables -C OUTPUT -o lo -j ACCEPT 2>/dev/null || sudo ip6tables -A OUTPUT -o lo -j ACCEPT\n'
+    actions+=$'sudo ip6tables -P OUTPUT DROP\n'
+  fi
+  actions+=$'# NOTE: default INPUT policy remains unchanged to avoid lockouts.\n'
 fi
 
 summary="firewall apply via ${chosen}; ssh ${ssh_port}; allows=${#norm_allows[@]}"
@@ -164,8 +214,16 @@ if [[ $SOLEN_FLAG_DRYRUN -eq 1 || $SOLEN_FLAG_YES -eq 0 ]]; then
   exit 0
 fi
 
-# Apply
+# Apply (with basic rollback for nftables/iptables)
 changed=0
+failed=0
+backup_ipt=""; backup_ip6t=""; backup_nft=""
+if [[ "$chosen" == "iptables" ]]; then
+  backup_ipt="/tmp/solen.iptables.$$.save"; sudo iptables-save >"$backup_ipt" || true
+  if command -v ip6tables >/dev/null 2>&1; then backup_ip6t="/tmp/solen.ip6tables.$$.save"; sudo ip6tables-save >"$backup_ip6t" || true; fi
+elif [[ "$chosen" == "nftables" ]]; then
+  backup_nft="/tmp/solen.nft.$$.rules"; sudo nft list ruleset >"$backup_nft" || true
+fi
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
   solen_info "$line"
@@ -173,8 +231,23 @@ while IFS= read -r line; do
   eval "$line"
   rc=$?
   set -e
-  if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
+  if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; failed=1; break; fi
 done <<< "$actions"
+
+if [[ $failed -eq 1 ]]; then
+  if [[ "$chosen" == "iptables" ]]; then
+    [[ -f "$backup_ipt" ]] && sudo iptables-restore <"$backup_ipt" || true
+    [[ -n "$backup_ip6t" && -f "$backup_ip6t" ]] && sudo ip6tables-restore <"$backup_ip6t" || true
+  elif [[ "$chosen" == "nftables" ]]; then
+    [[ -f "$backup_nft" ]] && sudo nft -f "$backup_nft" || true
+  fi
+  if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+    solen_json_record error "firewall apply failed and was rolled back" "$actions" "\"changed\":${changed}"
+  else
+    solen_err "apply failed; rolled back"
+  fi
+  exit 10
+fi
 
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
   solen_json_record ok "$summary" "$actions" "\"changed\":${changed}"

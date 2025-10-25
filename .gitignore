@@ -95,5 +95,5 @@ Thumbs.db
 .serverutils/
 
 
-dont commit diff files
+# dont commit diff files
 *.diff

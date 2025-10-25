@@ -101,9 +101,35 @@ while IFS= read -r line; do
   if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
 done <<< "$actions"
 
+maint_info=""
+packs="" contents="" errors=0 compaction_mentions=0
+set +e
+maint_info=$($SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia maintenance info 2>/dev/null)
+rc_info=$?
+stats_json=$($SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia content stats --json 2>/dev/null)
+rc_stats=$?
+set -e
+if [[ $rc_info -eq 0 && -n "$maint_info" ]]; then
+  errors=$(printf '%s\n' "$maint_info" | grep -i 'error' | wc -l | tr -d ' ')
+  compaction_mentions=$(printf '%s\n' "$maint_info" | grep -i 'compact' | wc -l | tr -d ' ')
+fi
+if [[ $rc_stats -eq 0 && -n "$stats_json" ]]; then
+  packs=$(printf '%s' "$stats_json" | sed -n 's/.*"packCount"\s*:\s*\([0-9]\+\).*/\1/p' | head -n1)
+  contents=$(printf '%s' "$stats_json" | sed -n 's/.*"contentCount"\s*:\s*\([0-9]\+\).*/\1/p' | head -n1)
+fi
+
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
-  solen_json_record ok "$summary" "$actions" "\"changed\":${changed}"
+  metrics="\"changed\":${changed},\"mode\":\"${mode}\",\"repo_kind\":\"${repo_kind}\""
+  [[ -n "$packs" ]] && metrics="$metrics,\"packCount\":${packs}"
+  [[ -n "$contents" ]] && metrics="$metrics,\"contentCount\":${contents}"
+  metrics="$metrics,\"compaction_mentions\":${compaction_mentions},\"errors\":${errors}"
+  solen_json_record ok "$summary" "$actions" "${metrics}"
 else
-  solen_ok "$summary (changed=${changed})"
+  extra=""
+  [[ -n "$packs" ]] && extra="$extra packs=$packs"
+  [[ -n "$contents" ]] && extra="$extra contents=$contents"
+  [[ "$compaction_mentions" != "0" ]] && extra="$extra compaction_mentions=$compaction_mentions"
+  [[ "$errors" != "0" ]] && extra="$extra errors=$errors"
+  solen_ok "$summary (changed=${changed}${extra})"
 fi
 exit 0

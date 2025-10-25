@@ -19,7 +19,8 @@ solen_init_flags
 
 usage() {
   cat << EOF
-Usage: $(basename "$0") [--port N] [--permit-root no|prohibit-password|yes] [--password-auth no|yes] [--allow-groups g1,g2]
+Usage: $(basename "$0") [--port N] [--permit-root no|prohibit-password|yes] [--password-auth no|yes] [--allow-groups g1,g2] \
+                         [--max-auth-tries N] [--permit-empty-passwords no|yes] [--skip-preflight] \
                          [--restart] [--dry-run] [--json] [--yes]
 
 Applies a hardened sshd_config:
@@ -27,11 +28,13 @@ Applies a hardened sshd_config:
   - PasswordAuthentication no (default; configurable)
   - PubkeyAuthentication yes
   - Optional custom Port and AllowGroups
+  - Optional MaxAuthTries and PermitEmptyPasswords
 
 Safety:
   - Dry-run by default if --yes not provided.
   - Backups original to /etc/ssh/sshd_config.<ts>.bak
   - Validates with 'sshd -t -f <tmp>' before applying.
+  - Preflight: if disabling password auth, ensure at least one authorized_keys exists (override with --skip-preflight)
   - Policy gates: tokens 'ssh-config-apply' and service restart allowance for ssh/sshd.
 EOF
 }
@@ -41,6 +44,9 @@ permit_root="no"
 password_auth="no"
 allow_groups=""
 do_restart=0
+skip_preflight=0
+max_auth_tries=""
+permit_empty=""
 
 while [[ $# -gt 0 ]]; do
   if solen_parse_common_flag "$1"; then shift; continue; fi
@@ -49,6 +55,9 @@ while [[ $# -gt 0 ]]; do
     --permit-root) permit_root="${2:-no}"; shift 2 ;;
     --password-auth) password_auth="${2:-no}"; shift 2 ;;
     --allow-groups) allow_groups="${2:-}"; shift 2 ;;
+    --max-auth-tries) max_auth_tries="${2:-}"; shift 2 ;;
+    --permit-empty-passwords) permit_empty="${2:-no}"; shift 2 ;;
+    --skip-preflight) skip_preflight=1; shift ;;
     --restart) do_restart=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --) shift; break ;;
@@ -82,6 +91,38 @@ if [[ -n "$allow_groups" ]]; then
   # Collapse commas/whitespace to spaces
   groups_norm=$(echo "$allow_groups" | sed 's/,/ /g; s/\s\+/ /g')
   set_lines+=("AllowGroups ${groups_norm}")
+fi
+if [[ -n "$max_auth_tries" ]]; then
+  set_lines+=("MaxAuthTries ${max_auth_tries}")
+fi
+if [[ -n "$permit_empty" ]]; then
+  set_lines+=("PermitEmptyPasswords ${permit_empty}")
+fi
+
+# Preflight: ensure at least one authorized key when disabling password auth
+if [[ $SOLEN_FLAG_DRYRUN -eq 0 && $SOLEN_FLAG_YES -eq 1 && $skip_preflight -eq 0 && "$password_auth" == "no" ]]; then
+  keys_ok=0
+  cand=("/root/.ssh/authorized_keys")
+  if [[ -n "${SUDO_USER:-}" ]]; then cand+=("/home/${SUDO_USER}/.ssh/authorized_keys"); fi
+  cand+=("/home/${USER}/.ssh/authorized_keys")
+  for p in /home/*/.ssh/authorized_keys; do [[ -e "$p" ]] && cand+=("$p"); done
+  for f in "${cand[@]}"; do
+    set +e
+    sudo sh -c "test -s '$f' && grep -vE '^(#|\s*$)' '$f' >/dev/null 2>&1"
+    rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then keys_ok=1; break; fi
+  done
+  if [[ $keys_ok -ne 1 ]]; then
+    msg="preflight failed: disabling password auth but no non-empty authorized_keys found (use --skip-preflight to override)"
+    if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+      solen_json_record error "$msg" "" "\"code\":12"
+    else
+      solen_err "$msg"
+    fi
+    rm -f "$tmp" || true
+    exit 12
+  fi
 fi
 
 # Build actions script (for dry-run display)
@@ -122,7 +163,7 @@ if [[ $SOLEN_FLAG_DRYRUN -eq 0 && $SOLEN_FLAG_YES -eq 1 ]]; then
   fi
 fi
 
-summary="sshd hardened (root=${permit_root}, passwords=${password_auth}${port:+, port=$port}${allow_groups:+, groups=$allow_groups})"
+summary="sshd hardened (root=${permit_root}, passwords=${password_auth}${port:+, port=$port}${allow_groups:+, groups=$allow_groups}${max_auth_tries:+, MaxAuthTries=$max_auth_tries}${permit_empty:+, PermitEmptyPasswords=$permit_empty})"
 
 if [[ $SOLEN_FLAG_DRYRUN -eq 1 || $SOLEN_FLAG_YES -eq 0 ]]; then
   if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
