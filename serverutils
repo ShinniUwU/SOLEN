@@ -11,7 +11,24 @@ IFS=$'\n\t'
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="${ROOT_DIR}/Scripts"
 # Audit path selection with env overrides
-DEFAULT_AUDIT_DIR="${ROOT_DIR}/.serverutils"
+SCHEMA_VERSION="1.0.0"
+
+# Audit/log directory precedence
+# 1) SOLEN_AUDIT_LOG explicit file overrides all
+# 2) SOLEN_LOG_DIR (new) overrides default directory
+# 3) If root/system: /var/log/solen ; else: ~/.local/share/solen
+# 4) SOLEN_AUDIT_DIR overrides chosen directory from (2)/(3)
+_DEFAULT_LOG_DIR_USER="${HOME}/.local/share/solen"
+_DEFAULT_LOG_DIR_SYSTEM="/var/log/solen"
+_BASE_LOG_DIR="${SOLEN_LOG_DIR:-}"
+if [[ -z "${_BASE_LOG_DIR}" ]]; then
+  if [[ ${EUID:-$(id -u 2>/dev/null || echo 1000)} -eq 0 ]]; then
+    _BASE_LOG_DIR="${_DEFAULT_LOG_DIR_SYSTEM}"
+  else
+    _BASE_LOG_DIR="${_DEFAULT_LOG_DIR_USER}"
+  fi
+fi
+DEFAULT_AUDIT_DIR="${_BASE_LOG_DIR}"
 AUDIT_DIR="${SOLEN_AUDIT_DIR:-$DEFAULT_AUDIT_DIR}"
 AUDIT_LOG="${SOLEN_AUDIT_LOG:-${AUDIT_DIR}/audit.log}"
 VERSION="0.1.0"
@@ -35,6 +52,10 @@ timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 ensure_audit() {
   mkdir -p "${AUDIT_DIR}" || true
   touch "${AUDIT_LOG}" || true
+  if [[ -z "${_SOLEN_AUDIT_ANNOUNCED:-}" ]]; then
+    echoinfo "audit log: ${AUDIT_LOG}"
+    _SOLEN_AUDIT_ANNOUNCED=1
+  fi
 }
 
 audit_log() {
@@ -211,23 +232,55 @@ cmd_home() {
       command -v clear >/dev/null 2>&1 && clear || true
       [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && { cat "${ROOT_DIR}/asciiart.ascii"; echo; }
       echo "SOLEN Runner — choose an action:"
-      echo "  1) List scripts with summaries"
-      echo "  2) Network inventory (IPs, ports, ping)"
+      echo "  1) List scripts (then run)"
+      echo "  2) Search scripts (then run)"
       echo "  3) Health check"
       echo "  4) Apt update/upgrade (dry-run)"
       echo "  5) Install runner (user)"
       echo "  6) Overview"
+      echo "  7) Setup MOTD (print snippet)"
+      echo "  r) Run a script by key/name"
       echo "  q) Quit"
       printf "> "
       local choice
       read -r choice
       case "$choice" in
-        1) cmd_list; ;;
-        2) cmd_run network/network-info; ;;
+        1)
+          cmd_list
+          echo
+          printf "Enter key/name to run (blank to return): "
+          read -r runkey
+          if [[ -n "$runkey" ]]; then
+            printf "Extra args (after --), or blank: "
+            read -r extra
+            if [[ -n "$extra" ]]; then cmd_run "$runkey" -- $extra; else cmd_run "$runkey"; fi
+          fi
+          ;;
+        2)
+          printf "Search query: "
+          read -r q
+          if [[ -n "$q" ]]; then
+            resolved="$(resolve_script_by_key_or_name "$q")"
+            if [[ -z "$resolved" ]]; then echoerr "No matches"; else
+              chosen="$(printf '%s\n' "$resolved" | choose_interactively)"
+              [[ -n "$chosen" ]] && cmd_run "$chosen"
+            fi
+          fi
+          ;;
+        r|R)
+          printf "Enter key/name to run: "
+          read -r runkey
+          if [[ -n "$runkey" ]]; then
+            printf "Extra args (after --), or blank: "
+            read -r extra
+            if [[ -n "$extra" ]]; then cmd_run "$runkey" -- $extra; else cmd_run "$runkey"; fi
+          fi
+          ;;
         3) cmd_run health/check; ;;
         4) cmd_run system-maintenance/update-and-report -- --dry-run; ;;
         5) cmd_install_runner --user; ;;
         6) cmd_overview; ;;
+        7) cmd_setup_motd; ;;
         q|Q|"" ) break ;;
         *) echoerr "Unknown choice" ;;
       esac
@@ -579,6 +632,75 @@ cmd_uninstall_scripts() {
   audit_log "UNINSTALL_SCRIPTS scope=${scope} dir=${bindir} prefix=${prefix} user=${USER:-unknown} removed=${removed}"
 }
 
+cmd_install_units() {
+  local scope="user" force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --global) scope="global"; shift ;;
+      --user) scope="user"; shift ;;
+      --force) force=1; shift ;;
+      *) echoerr "Unknown option: $1"; exit 2 ;;
+    esac
+  done
+  local dest
+  if [[ "$scope" == "global" ]]; then
+    dest="/etc/systemd/system"
+  else
+    dest="${HOME}/.config/systemd/user"
+  fi
+  mkdir -p "$dest"
+  local installed=0
+  for f in "$ROOT_DIR"/systemd/*.{service,timer}; do
+    [[ -f "$f" ]] || continue
+    local base="$(basename "$f")"
+    local target="$dest/$base"
+    if [[ -e "$target" && $force -ne 1 ]]; then
+      echowarn "Exists (skip): $target"
+      continue
+    fi
+    if [[ "$scope" == "global" ]]; then
+      sed -e 's#append:%h/.local/share/solen#append:/var/log/solen#g' \
+          -e '/^ExecStartPre=.*mkdir -p/s#%h/.local/share/solen#/var/log/solen#' \
+          "$f" > "$target.tmp"
+      if ! grep -q '^ExecStartPre=.*/var/log/solen' "$target.tmp"; then
+        awk '1; $0=="[Service]" {print "ExecStartPre=/usr/bin/env mkdir -p /var/log/solen"}' "$target.tmp" > "$target"
+        rm -f "$target.tmp"
+      else
+        mv "$target.tmp" "$target"
+      fi
+    else
+      cp -f "$f" "$target"
+    fi
+    installed=$((installed+1))
+  done
+  echook "Installed ${installed} unit files to $dest"
+  if [[ "$scope" == "user" ]]; then
+    echo "  Next: systemctl --user daemon-reload"
+  else
+    echo "  Next: sudo systemctl daemon-reload"
+  fi
+}
+
+cmd_setup_quickstart() {
+  echoinfo "Setting up SOLEN quickstart"
+  mkdir -p "${HOME}/.local/share/solen" "${HOME}/.config/systemd/user" || true
+  # Policy
+  local policy_src="${ROOT_DIR}/config/solen-policy.example.yaml"
+  local policy_dst="${HOME}/.serverutils/policy.yaml"
+  mkdir -p "${HOME}/.serverutils"
+  if [[ -f "$policy_dst" ]]; then
+    echowarn "Policy exists: $policy_dst"
+  else
+    cp "$policy_src" "$policy_dst" && echook "Installed policy: $policy_dst"
+  fi
+  # Install units (user)
+  cmd_install_units --user
+  echoinfo "Optionally enable timers:"
+  echo "  systemctl --user daemon-reload"
+  echo "  systemctl --user enable --now solen-health.timer"
+  echo "  systemctl --user enable --now solen-backups@etc.timer"
+}
+
 cmd_doctor() {
   local missing=0
   local deps=(bash find awk sed grep)
@@ -618,6 +740,10 @@ Usage:
     #          --alias <bin> (install additional alias)
   serverutils install-scripts [--user|--global] [--prefix su-] [--force]
   serverutils uninstall-scripts [--user|--global] [--prefix su-]
+  serverutils install-units [--user|--global] [--force]
+  serverutils setup                 # quickstart policy + units install
+  serverutils setup-motd            # print shell config snippet to enable auto-MOTD
+  serverutils setup-motd-system     # print system-wide SSH MOTD snippets (update-motd/profile.d)
   serverutils meta <category/name|name|path> [--json]
   serverutils banner
   serverutils validate [--subset PATTERN[,PATTERN..]] [--strict] [--no-policy]
@@ -660,6 +786,43 @@ Top-level commands (TL;DR):
   overview     Print environment and scripts summary
   tui          Interactive menu UI (default on TTY when no args)
 EOF
+}
+
+cmd_setup_motd() {
+  echoinfo "Enable SOLEN MOTD in interactive shells (no edits performed)"
+  echo
+  echo "Bash — add to ~/.bashrc:"
+  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
+  echo
+  echo "Zsh — add to ~/.zshrc:"
+  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
+  echo
+  echo "Fish — add to ~/.config/fish/config.fish:"
+  echo "  if status is-interactive"
+  echo "      serverutils run motd/solen-motd -- --plain"
+  echo "  end"
+  echo
+  echoinfo "System-wide (admin): create /etc/profile.d/solen-motd.sh with the bash/zsh line"
+  echoinfo "Docs: docs/MOTD.md (performance, SSH, timers)"
+}
+
+cmd_setup_motd_system() {
+  echoinfo "System-wide SSH MOTD (no edits performed)"
+  echo
+  echo "Debian/Ubuntu — /etc/update-motd.d/90-solen (executable):"
+  cat <<'E'
+#!/bin/sh
+[ -x /usr/local/bin/serverutils ] || exit 0
+[ -t 1 ] || exit 0
+serverutils run motd/solen-motd -- --plain
+E
+  echo
+  echo "Then: chmod +x /etc/update-motd.d/90-solen"
+  echo
+  echo "Red Hat/Fedora (or no update-motd) — /etc/profile.d/solen-motd.sh:"
+  echo '  [ "$PS1" ] && [ -x /usr/local/bin/serverutils ] && serverutils run motd/solen-motd -- --plain'
+  echo
+  echoinfo "Remove the file(s) to disable. Docs: docs/MOTD.md"
 }
 
 main() {
@@ -780,8 +943,12 @@ main() {
     install-runner) cmd_install_runner "$@" ;;
     install-scripts) cmd_install_scripts "$@" ;;
     uninstall-scripts) cmd_uninstall_scripts "$@" ;;
+    install-units) cmd_install_units "$@" ;;
+    setup) cmd_setup_quickstart "$@" ;;
+    setup-motd) cmd_setup_motd "$@" ;;
+    setup-motd-system) cmd_setup_motd_system "$@" ;;
     doctor) cmd_doctor "$@" ;;
-    version) echo "$VERSION" ;;
+    version) echo "$VERSION (schema $SCHEMA_VERSION)" ;;
     help|-h|--help) show_help ;;
     *) echoerr "Unknown command: $cmd"; echo; show_help; exit 2 ;;
   esac

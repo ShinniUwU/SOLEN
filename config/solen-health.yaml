@@ -1,4 +1,8 @@
 # SOLEN Health thresholds (scaffold)
+# Parser behavior:
+#  - If 'yq' is installed, thresholds are read via yq (supports standard YAML).
+#  - If 'yq' is not present, a lightweight awk fallback supports the inline
+#    shapes used below (flat threshold keys and inline service allow list).
 
 thresholds:
   disk_root_pct:
@@ -11,5 +15,5 @@ thresholds:
     warn: 70
     error: 85
 services:
+  # Inline list supported by awk fallback; multiline lists are supported when yq is available
   allow: ["sshd", "cron", "docker", "jellyfin"]
-

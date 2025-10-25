@@ -1,0 +1,9 @@
+{
+  "expressions": [
+    "has(\"metrics\")",
+    ".metrics.disk_root_pct|type==\"number\"",
+    ".metrics.load15_per_core|type==\"number\"",
+    ".metrics.mem_pressure_pct|type==\"number\""
+  ]
+}
+

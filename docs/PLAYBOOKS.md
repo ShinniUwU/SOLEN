@@ -12,6 +12,13 @@
 4. Health check
    - `serverutils run health/check -- --json`
 
+## Security posture
+
+1. Baseline security review (read-only)
+   - `serverutils run security/baseline-check -- --json`
+2. Firewall status
+   - `serverutils run security/firewall-status -- --json`
+
 ## Docker roll (single app)
 
 1. Inspect Docker state
@@ -21,4 +28,3 @@
    - `serverutils run docker/update-docker-compose-app -- /srv/app`
 3. Health check
    - `serverutils run health/check -- --json`
-

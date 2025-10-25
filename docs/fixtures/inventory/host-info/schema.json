@@ -1,0 +1,8 @@
+{
+  "expressions": [
+    "has(\"metrics\")",
+    ".metrics.mem_total_mi|type==\"number\"",
+    ".metrics.mem_used_mi|type==\"number\""
+  ]
+}
+

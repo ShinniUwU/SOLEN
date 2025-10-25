@@ -1,5 +1,9 @@
 # SOLEN (ServerUtils) 🛠️
 
+<p align="center">
+  <img src="./solen_logo.png" alt="SOLEN Logo" width="420" />
+</p>
+
 Welcome to SOLEN (ServerUtils). This is a growing collection of handy shell scripts designed to simplify common tasks on self-hosted servers, especially **Debian-based systems** (like those in Proxmox LXCs).
 
 Think of these as simple tools to automate repetitive jobs and keep things running smoothly.
@@ -80,12 +84,15 @@ All the scripts live inside the [`Scripts/`](./Scripts/) directory, organized in
 | [`docker/`](./Scripts/docker/)                     | Utilities for managing Docker containers and images. 🐳      |
 | [`log-management/`](./Scripts/log-management/)     | Scripts for cleaning and managing system logs. 🪵            |
 | [`network/`](./Scripts/network/)                   | Tools for checking network status and information. 🌐        |
+| [`inventory/`](./Scripts/inventory/)               | Fast read-only host inventory. 📋                           |
+| [`security/`](./Scripts/security/)                 | Baseline security checks and firewall status. 🔐             |
 | [`system-maintenance/`](./Scripts/system-maintenance/) | Scripts for general system updates and upkeep. 🔧            |
 
 You can list all scripts and their categories at any time with:
 
 ```
 ./serverutils list
+```
 
 ---
 
@@ -101,6 +108,9 @@ You can list all scripts and their categories at any time with:
 | `system-maintenance/update-and-report` | update, upgrade | no (uses sudo) | apt, update | summary | 0.1.0 | yes | yes |
 | `backups/run` | backup | no | backup, retention | metrics.rollup | 0.1.0 | yes | yes |
 | `health/check` | check | no | health, monitoring | metrics.rollup | 0.1.0 | yes | yes |
+| `inventory/host-info` | info | no | inventory | metrics, details | 0.1.0 | yes | n/a |
+| `security/baseline-check` | check,info | no | security, baseline | details, metrics.issues | 0.1.0 | yes | n/a |
+| `security/firewall-status` | info,check | no | security, firewall | details.kind, details.enabled | 0.1.0 | yes | n/a |
 
 Docs:
 - Backups scaffold: `docs/BACKUPS.md`
@@ -109,13 +119,17 @@ Docs:
 Notes:
 - Root requirement “no” assumes the user has the necessary privileges (e.g., in the `docker` group) when applicable.
 - As we standardize, scripts will adopt `--dry-run`, `--json`, and the exit code framework.
-```
 
 ## Getting Started
 
 1.  Browse the [`Scripts/`](./Scripts/) directory and find a category/script that looks interesting.
 2.  Read the `README.md` *inside that category's folder* for detailed usage instructions.
 3.  Run the scripts! (Use with caution, especially if your environment differs significantly from Debian on Proxmox LXC).
+
+### Optional: Show SOLEN MOTD at login
+
+Add a one‑liner to your shell config (bash/zsh/fish) to display the SOLEN summary when opening a terminal. See docs/MOTD.md for copy‑paste snippets and guidance (interactive only; safe for scripts/CI).
+You can also run `serverutils setup-motd` to print the snippet for your shell.
 
 ## Want to Contribute? ✨
 

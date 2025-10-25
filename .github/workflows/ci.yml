@@ -1,37 +1,74 @@
-name: Check Shell Scripts 🧪
+name: SOLEN CI
 
 on:
-  pull_request:
-    branches: [ main ]
   push:
-    branches: [ main ]
-
-permissions:
-  contents: read
-  checks: write
+    branches: [ main, master ]
+    tags: [ 'v*', 'V*' ]
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [ published ]
 
 jobs:
-  lint-and-syntax-check:
-    name: Lint and Syntax Check ✨
+  lint:
+    name: Shellcheck Lint
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out code 🛒
-        uses: actions/checkout@v4
-
-      - name: Run ShellCheck Linter 🧐
-        uses: ludeeus/action-shellcheck@master
-        with:
-          scandir: './Scripts'
-          severity: style
-        env:
-          # Exclude SC2155 and SC2317
-          SHELLCHECK_OPTS: -e SC2155 -e SC2317
-
-      - name: Check Bash Syntax ✅
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
         run: |
-          echo " "
-          echo "🧪 Running 'bash -n' syntax check on all .sh files..."
-          echo "-----------------------------------------------------"
-          find ./Scripts -type f -name '*.sh' -print0 | xargs -0 -I {} sh -c 'echo "Checking --> {}"; bash -n "{}"; echo "-----------------------------------------------------"'
-          echo "✅ Syntax check complete!"
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck
+        run: |
+          shellcheck --version
+          # Allow sourcing warnings (SC1091) for portable library sourcing
+          shellcheck -e SC1091 serverutils
+          find Scripts -type f -name '*.sh' -print0 | xargs -0 -n1 shellcheck -e SC1091
+
+  validate:
+    name: Validate JSON shape (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ 'debian:stable-slim', 'fedora:latest' ]
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps (Debian)
+        if: startsWith(matrix.image, 'debian')
+        run: |
+          apt-get update -y
+          DEBIAN_FRONTEND=noninteractive apt-get install -y bash jq iproute2 procps coreutils findutils gawk sed curl
+      - name: Install deps (Fedora)
+        if: startsWith(matrix.image, 'fedora')
+        run: |
+          dnf -y install bash jq iproute iproute-tc procps-ng coreutils findutils gawk sed curl
+      - name: Validate commands JSON shape
+        run: |
+          bash ci/validate-json.sh
+
+  package-deb:
+    name: Build .deb (on tag/release)
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .deb
+        run: |
+          bash ci/build-deb.sh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: solen-deb
+          path: dist/*.deb
+      - name: Attach to release (if available)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

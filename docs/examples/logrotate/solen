@@ -1,0 +1,9 @@
+/var/log/solen/*.ndjson /var/log/solen/audit.log {
+  daily
+  rotate 14
+  compress
+  missingok
+  notifempty
+  copytruncate
+}
+

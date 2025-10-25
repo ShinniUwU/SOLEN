@@ -1,0 +1,6 @@
+{
+  "expressions": [
+    "(has(\\\"details\\\") and ((.details.container|type==\\\"object\\\") or (.details.image|type==\\\"object\\\")))"
+  ]
+}
+

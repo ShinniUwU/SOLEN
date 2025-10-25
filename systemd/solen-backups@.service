@@ -1,0 +1,11 @@
+[Unit]
+Description=SOLEN backup profile %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Downloads/ServerUtils
+Environment=SOLEN_PLAIN=1
+ExecStart=./serverutils run backups/run -- run --profile %i --json
+ExecStartPre=/usr/bin/env mkdir -p %h/.local/share/solen
+StandardOutput=append:%h/.local/share/solen/backups-%i.ndjson
+StandardError=journal

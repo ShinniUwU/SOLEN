@@ -1,0 +1,7 @@
+{
+  "expressions": [
+    "has(\"details\")",
+    ".details.sshd|type==\"object\""
+  ]
+}
+

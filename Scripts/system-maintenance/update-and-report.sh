@@ -18,7 +18,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 solen_init_flags
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: $0 [--dry-run] [--json] [--yes]
 
 Refresh apt indexes, attempt fix-broken, upgrade packages, and report recently upgraded packages.
@@ -26,17 +26,34 @@ EOF
 }
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) echo "unknown option: $1" >&2; usage; exit 1 ;; *) break;; esac
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
+  case "$1" in -h | --help)
+    usage
+    exit 0
+    ;;
+  --)
+    shift
+    break
+    ;;
+  -*)
+    echo "unknown option: $1" >&2
+    usage
+    exit 1
+    ;;
+  *) break ;; esac
 done
 
-if ! command -v apt >/dev/null 2>&1; then
+if ! command -v apt > /dev/null 2>&1; then
   solen_err "apt not found"
   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "apt not found" "" "\"code\":2"
   exit 2
 fi
 
-actions=$(cat <<A
+actions=$(
+  cat << A
 sudo apt update
 sudo apt --fix-broken install -y
 sudo apt upgrade -y

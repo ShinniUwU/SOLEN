@@ -1,0 +1,11 @@
+[Unit]
+Description=SOLEN health check (NDJSON append)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Downloads/ServerUtils
+Environment=SOLEN_PLAIN=1
+ExecStart=./serverutils run health/check -- --json
+ExecStartPre=/usr/bin/env mkdir -p %h/.local/share/solen
+StandardOutput=append:%h/.local/share/solen/health.ndjson
+StandardError=journal

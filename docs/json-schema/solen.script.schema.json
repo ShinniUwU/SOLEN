@@ -8,6 +8,7 @@
   "properties": {
     "status": { "type": "string", "enum": ["ok", "warn", "error"] },
     "summary": { "type": "string" },
+    "op": { "type": "string" },
     "details": { "type": "object", "additionalProperties": true },
     "metrics": {
       "type": "object",
@@ -29,4 +30,3 @@
     "key": { "type": "string" }
   }
 }
-

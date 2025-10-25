@@ -18,7 +18,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 solen_init_flags
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage:
   $(basename "$0") run --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
   $(basename "$0") prune --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
@@ -28,6 +28,10 @@ Environment:
   SOLEN_BACKUPS_DEST     Override destination root
   SOLEN_BACKUPS_RETENTION_DAYS  Override retention days
 
+Safety:
+  - Dry-run is enforced by default; use --yes or SOLEN_ASSUME_YES=1 to apply changes.
+  - Policy gates: requires allow tokens backup-profile:<name> and backup-path:<dest>.
+
 Note: This is a scaffold. No copy or prune is performed yet.
 EOF
 }
@@ -35,22 +39,54 @@ EOF
 cmd="${1:-}"
 shift || true
 
-profile=""; dest_override="${SOLEN_BACKUPS_DEST:-}"; ret_days="${SOLEN_BACKUPS_RETENTION_DAYS:-}"
+profile=""
+dest_override="${SOLEN_BACKUPS_DEST:-}"
+ret_days="${SOLEN_BACKUPS_RETENTION_DAYS:-}"
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --profile) profile="${2:-}"; shift 2 ;;
-    --dest) dest_override="${2:-}"; shift 2 ;;
-    --retention-days) ret_days="${2:-}"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    --profile)
+      profile="${2:-}"
+      shift 2
+      ;;
+    --dest)
+      dest_override="${2:-}"
+      shift 2
+      ;;
+    --retention-days)
+      ret_days="${2:-}"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) break ;;
   esac
 done
 
-[[ -n "$cmd" ]] || { solen_err "missing subcommand (run|prune)"; usage; exit 1; }
-[[ -n "$profile" ]] || { solen_err "missing --profile"; usage; exit 1; }
+[[ -n "$cmd" ]] || {
+  solen_err "missing subcommand (run|prune)"
+  usage
+  exit 1
+}
+[[ -n "$profile" ]] || {
+  solen_err "missing --profile"
+  usage
+  exit 1
+}
 
 # Resolve config and dest (scaffold defaults)
 ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
@@ -70,6 +106,18 @@ if ! solen_policy_allows_token "backup-path:${dest}"; then
   exit 4
 fi
 
+# Enforce dry-run by default (safety); require --yes for real changes
+if [[ "$cmd" =~ ^(run|prune)$ ]]; then
+  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 0 && ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+    SOLEN_FLAG_DRYRUN=1
+    if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+      solen_json_record warn "dry-run enforced (use --yes to apply changes)"
+    else
+      solen_warn "dry-run enforced (use --yes to apply changes)"
+    fi
+  fi
+fi
+
 # Begin line
 begin_msg="begin: backup ${profile} at ${dest}"
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
@@ -83,7 +131,8 @@ sources_count=3
 bytes_planned=123456789
 files_planned=4200
 prune_planned=1
-actions_list=$(cat <<A
+actions_list=$(
+  cat << A
 mkdir -p "${dest}/${profile}-YYYYMMDD-HHMMSS"
 rsync -aAXH --delete <sources...> "${dest}/${profile}-.../"
 ln -sfn "${dest}/${profile}-..." "${dest}/${profile}-latest"
@@ -135,4 +184,3 @@ else
   usage
   exit 1
 fi
-

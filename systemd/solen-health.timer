@@ -1,0 +1,11 @@
+[Unit]
+Description=Every 15 minutes run SOLEN health
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15m
+AccuracySec=1m
+Unit=solen-health.service
+
+[Install]
+WantedBy=timers.target

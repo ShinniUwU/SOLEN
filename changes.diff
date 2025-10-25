@@ -1,0 +1,1653 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 157554e..cb0a1a2 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,37 +1,74 @@
+-name: Check Shell Scripts 🧪
++name: SOLEN CI
+ 
+ on:
+-  pull_request:
+-    branches: [ main ]
+   push:
+-    branches: [ main ]
+-
+-permissions:
+-  contents: read
+-  checks: write
++    branches: [ main, master ]
++    tags: [ 'v*', 'V*' ]
++  pull_request:
++    branches: [ main, master ]
++  release:
++    types: [ published ]
+ 
+ jobs:
+-  lint-and-syntax-check:
+-    name: Lint and Syntax Check ✨
++  lint:
++    name: Shellcheck Lint
+     runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Install shellcheck
++        run: |
++          sudo apt-get update -y
++          sudo apt-get install -y shellcheck
++      - name: Run shellcheck
++        run: |
++          shellcheck --version
++          # Allow sourcing warnings (SC1091) for portable library sourcing
++          shellcheck -e SC1091 serverutils
++          find Scripts -type f -name '*.sh' -print0 | xargs -0 -n1 shellcheck -e SC1091
+ 
++  validate:
++    name: Validate JSON shape (${{ matrix.image }})
++    runs-on: ubuntu-latest
++    strategy:
++      fail-fast: false
++      matrix:
++        image: [ 'debian:stable-slim', 'fedora:latest' ]
++    container:
++      image: ${{ matrix.image }}
+     steps:
+-      - name: Check out code 🛒
+-        uses: actions/checkout@v4
++      - uses: actions/checkout@v4
++      - name: Install deps (Debian)
++        if: startsWith(matrix.image, 'debian')
++        run: |
++          apt-get update -y
++          DEBIAN_FRONTEND=noninteractive apt-get install -y bash jq iproute2 procps coreutils findutils gawk sed curl
++      - name: Install deps (Fedora)
++        if: startsWith(matrix.image, 'fedora')
++        run: |
++          dnf -y install bash jq iproute iproute-tc procps-ng coreutils findutils gawk sed curl
++      - name: Validate commands JSON shape
++        run: |
++          bash ci/validate-json.sh
+ 
+-      - name: Run ShellCheck Linter 🧐
+-        uses: ludeeus/action-shellcheck@master
++  package-deb:
++    name: Build .deb (on tag/release)
++    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - name: Build .deb
++        run: |
++          bash ci/build-deb.sh
++      - name: Upload artifact
++        uses: actions/upload-artifact@v4
++        with:
++          name: solen-deb
++          path: dist/*.deb
++      - name: Attach to release (if available)
++        if: github.event_name == 'release'
++        uses: softprops/action-gh-release@v1
+         with:
+-          scandir: './Scripts'
+-          severity: style
++          files: dist/*.deb
+         env:
+-          # Exclude SC2155 and SC2317
+-          SHELLCHECK_OPTS: -e SC2155 -e SC2317
++          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+ 
+-      - name: Check Bash Syntax ✅
+-        run: |
+-          echo " "
+-          echo "🧪 Running 'bash -n' syntax check on all .sh files..."
+-          echo "-----------------------------------------------------"
+-          find ./Scripts -type f -name '*.sh' -print0 | xargs -0 -I {} sh -c 'echo "Checking --> {}"; bash -n "{}"; echo "-----------------------------------------------------"'
+-          echo "✅ Syntax check complete!"
+diff --git a/README.md b/README.md
+index e637ad4..7435831 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,9 @@
+ # SOLEN (ServerUtils) 🛠️
+ 
++<p align="center">
++  <img src="./solen_logo.png" alt="SOLEN Logo" width="420" />
++</p>
++
+ Welcome to SOLEN (ServerUtils). This is a growing collection of handy shell scripts designed to simplify common tasks on self-hosted servers, especially **Debian-based systems** (like those in Proxmox LXCs).
+ 
+ Think of these as simple tools to automate repetitive jobs and keep things running smoothly.
+@@ -80,12 +84,15 @@ All the scripts live inside the [`Scripts/`](./Scripts/) directory, organized in
+ | [`docker/`](./Scripts/docker/)                     | Utilities for managing Docker containers and images. 🐳      |
+ | [`log-management/`](./Scripts/log-management/)     | Scripts for cleaning and managing system logs. 🪵            |
+ | [`network/`](./Scripts/network/)                   | Tools for checking network status and information. 🌐        |
++| [`inventory/`](./Scripts/inventory/)               | Fast read-only host inventory. 📋                           |
++| [`security/`](./Scripts/security/)                 | Baseline security checks and firewall status. 🔐             |
+ | [`system-maintenance/`](./Scripts/system-maintenance/) | Scripts for general system updates and upkeep. 🔧            |
+ 
+ You can list all scripts and their categories at any time with:
+ 
+ ```
+ ./serverutils list
++```
+ 
+ ---
+ 
+@@ -101,6 +108,9 @@ You can list all scripts and their categories at any time with:
+ | `system-maintenance/update-and-report` | update, upgrade | no (uses sudo) | apt, update | summary | 0.1.0 | yes | yes |
+ | `backups/run` | backup | no | backup, retention | metrics.rollup | 0.1.0 | yes | yes |
+ | `health/check` | check | no | health, monitoring | metrics.rollup | 0.1.0 | yes | yes |
++| `inventory/host-info` | info | no | inventory | metrics, details | 0.1.0 | yes | n/a |
++| `security/baseline-check` | check,info | no | security, baseline | details, metrics.issues | 0.1.0 | yes | n/a |
++| `security/firewall-status` | info,check | no | security, firewall | details.kind, details.enabled | 0.1.0 | yes | n/a |
+ 
+ Docs:
+ - Backups scaffold: `docs/BACKUPS.md`
+@@ -109,7 +119,6 @@ Docs:
+ Notes:
+ - Root requirement “no” assumes the user has the necessary privileges (e.g., in the `docker` group) when applicable.
+ - As we standardize, scripts will adopt `--dry-run`, `--json`, and the exit code framework.
+-```
+ 
+ ## Getting Started
+ 
+@@ -117,6 +126,11 @@ Notes:
+ 2.  Read the `README.md` *inside that category's folder* for detailed usage instructions.
+ 3.  Run the scripts! (Use with caution, especially if your environment differs significantly from Debian on Proxmox LXC).
+ 
++### Optional: Show SOLEN MOTD at login
++
++Add a one‑liner to your shell config (bash/zsh/fish) to display the SOLEN summary when opening a terminal. See docs/MOTD.md for copy‑paste snippets and guidance (interactive only; safe for scripts/CI).
++You can also run `serverutils setup-motd` to print the snippet for your shell.
++
+ ## Want to Contribute? ✨
+ 
+ Found a bug? Have an idea for a new script? Contributions are welcome!
+diff --git a/Scripts/README.md b/Scripts/README.md
+index bb2a7b9..633b099 100644
+--- a/Scripts/README.md
++++ b/Scripts/README.md
+@@ -16,4 +16,6 @@ Tip: Use the top-level `serverutils` runner to list and run any script without c
+ * [`health/`](./health/) - Fast health checks scaffold. 🩺
+ * [`log-management/`](./log-management/) - Scripts for cleaning and managing system logs. 🪵
+ * [`network/`](./network/) - Tools for checking network status and information. 🌐
++* [`inventory/`](./inventory/) - Fast read-only host inventory. 📋
++* [`security/`](./security/) - Baseline security checks and firewall status. 🔐
+ * [`system-maintenance/`](./system-maintenance/) - Scripts for general system updates and upkeep. 🔧
+diff --git a/Scripts/backups/run.sh b/Scripts/backups/run.sh
+index a73a0e2..ccaa73c 100755
+--- a/Scripts/backups/run.sh
++++ b/Scripts/backups/run.sh
+@@ -18,7 +18,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage:
+   $(basename "$0") run --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
+   $(basename "$0") prune --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
+@@ -28,6 +28,10 @@ Environment:
+   SOLEN_BACKUPS_DEST     Override destination root
+   SOLEN_BACKUPS_RETENTION_DAYS  Override retention days
+ 
++Safety:
++  - Dry-run is enforced by default; use --yes or SOLEN_ASSUME_YES=1 to apply changes.
++  - Policy gates: requires allow tokens backup-profile:<name> and backup-path:<dest>.
++
+ Note: This is a scaffold. No copy or prune is performed yet.
+ EOF
+ }
+@@ -35,22 +39,54 @@ EOF
+ cmd="${1:-}"
+ shift || true
+ 
+-profile=""; dest_override="${SOLEN_BACKUPS_DEST:-}"; ret_days="${SOLEN_BACKUPS_RETENTION_DAYS:-}"
++profile=""
++dest_override="${SOLEN_BACKUPS_DEST:-}"
++ret_days="${SOLEN_BACKUPS_RETENTION_DAYS:-}"
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
+   case "$1" in
+-    --profile) profile="${2:-}"; shift 2 ;;
+-    --dest) dest_override="${2:-}"; shift 2 ;;
+-    --retention-days) ret_days="${2:-}"; shift 2 ;;
+-    -h|--help) usage; exit 0 ;;
+-    --) shift; break ;;
+-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
++    --profile)
++      profile="${2:-}"
++      shift 2
++      ;;
++    --dest)
++      dest_override="${2:-}"
++      shift 2
++      ;;
++    --retention-days)
++      ret_days="${2:-}"
++      shift 2
++      ;;
++    -h | --help)
++      usage
++      exit 0
++      ;;
++    --)
++      shift
++      break
++      ;;
++    -*)
++      solen_err "unknown option: $1"
++      usage
++      exit 1
++      ;;
+     *) break ;;
+   esac
+ done
+ 
+-[[ -n "$cmd" ]] || { solen_err "missing subcommand (run|prune)"; usage; exit 1; }
+-[[ -n "$profile" ]] || { solen_err "missing --profile"; usage; exit 1; }
++[[ -n "$cmd" ]] || {
++  solen_err "missing subcommand (run|prune)"
++  usage
++  exit 1
++}
++[[ -n "$profile" ]] || {
++  solen_err "missing --profile"
++  usage
++  exit 1
++}
+ 
+ # Resolve config and dest (scaffold defaults)
+ ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
+@@ -70,6 +106,18 @@ if ! solen_policy_allows_token "backup-path:${dest}"; then
+   exit 4
+ fi
+ 
++# Enforce dry-run by default (safety); require --yes for real changes
++if [[ "$cmd" =~ ^(run|prune)$ ]]; then
++  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 0 && ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
++    SOLEN_FLAG_DRYRUN=1
++    if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
++      solen_json_record warn "dry-run enforced (use --yes to apply changes)"
++    else
++      solen_warn "dry-run enforced (use --yes to apply changes)"
++    fi
++  fi
++fi
++
+ # Begin line
+ begin_msg="begin: backup ${profile} at ${dest}"
+ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+@@ -83,7 +131,8 @@ sources_count=3
+ bytes_planned=123456789
+ files_planned=4200
+ prune_planned=1
+-actions_list=$(cat <<A
++actions_list=$(
++  cat << A
+ mkdir -p "${dest}/${profile}-YYYYMMDD-HHMMSS"
+ rsync -aAXH --delete <sources...> "${dest}/${profile}-.../"
+ ln -sfn "${dest}/${profile}-..." "${dest}/${profile}-latest"
+@@ -135,4 +184,3 @@ else
+   usage
+   exit 1
+ fi
+-
+diff --git a/Scripts/docker/list-docker-info.sh b/Scripts/docker/list-docker-info.sh
+index fa6f85e..5414c9a 100755
+--- a/Scripts/docker/list-docker-info.sh
++++ b/Scripts/docker/list-docker-info.sh
+@@ -19,7 +19,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage: $0 [--dry-run] [--json]
+ 
+ List Docker containers and images on this host. Read-only.
+@@ -27,8 +27,24 @@ EOF
+ }
+ 
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
+-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) solen_err "unknown option: $1"; usage; exit 1 ;; *) break;; esac
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
++  case "$1" in -h | --help)
++    usage
++    exit 0
++    ;;
++  --)
++    shift
++    break
++    ;;
++  -*)
++    solen_err "unknown option: $1"
++    usage
++    exit 1
++    ;;
++  *) break ;; esac
+ done
+ 
+ # Optional policy token: docker-introspection
+@@ -44,13 +60,13 @@ if ! solen_policy_allows_token "docker-introspection"; then
+   exit 4
+ fi
+ 
+-if ! command -v docker >/dev/null 2>&1; then
++if ! command -v docker > /dev/null 2>&1; then
+   solen_err "docker not found"
+   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "docker not accessible (install or add user to docker group)" "" "\"code\":2"
+   exit 2
+ fi
+ 
+-if ! docker info >/dev/null 2>&1; then
++if ! docker info > /dev/null 2>&1; then
+   solen_err "cannot connect to Docker daemon"
+   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "docker not accessible (daemon or permissions)" "" "\"code\":2"
+   exit 2
+@@ -62,52 +78,71 @@ images_tmp=$(mktemp)
+ trap 'rm -f "$containers_tmp" "$images_tmp"' EXIT
+ 
+ # columns: name id image status ports runningfor compose_project
+-docker ps -a --format '{{.Names}}\t{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.RunningFor}}\t{{.Label "com.docker.compose.project"}}' >"$containers_tmp" || true
+-docker images --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' >"$images_tmp" || true
++docker ps -a --format '{{.Names}}\t{{.ID}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.RunningFor}}\t{{.Label "com.docker.compose.project"}}' > "$containers_tmp" || true
++docker images --format '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.Size}}' > "$images_tmp" || true
+ 
+ # Build NDJSON output or human output
+ 
+-containers_total=0; running=0; exited=0; unhealthy=0
+-images_total=0; images_dangling=0
++containers_total=0
++running=0
++exited=0
++unhealthy=0
++images_total=0
++images_dangling=0
+ 
+ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+   # Emit per-container records
+   while IFS=$'\t' read -r name id image status ports runningfor compose; do
+     [[ -z "$name" ]] && continue
+-    containers_total=$((containers_total+1))
+-    state="unknown"; health=""
+-    if [[ "$status" == Up* ]]; then state="running"; running=$((running+1)); fi
+-    if [[ "$status" == Exited* ]]; then state="exited"; exited=$((exited+1)); fi
+-    if echo "$status" | grep -qi '(unhealthy)'; then health="unhealthy"; unhealthy=$((unhealthy+1)); fi
++    containers_total=$((containers_total + 1))
++    state="unknown"
++    health=""
++    if [[ "$status" == Up* ]]; then
++      state="running"
++      running=$((running + 1))
++    fi
++    if [[ "$status" == Exited* ]]; then
++      state="exited"
++      exited=$((exited + 1))
++    fi
++    if echo "$status" | grep -qi '(unhealthy)'; then
++      health="unhealthy"
++      unhealthy=$((unhealthy + 1))
++    fi
+     if echo "$status" | grep -qi '(healthy)'; then health="healthy"; fi
+     id_short="${id:0:12}"
+-    # details record
++    # details record via unified envelope
+     summary="container ${name} ${state}"
+-    metrics="\"container\":1"
+-    actions=""
+-    printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","details":{"container":{"name":"%s","id_short":"%s","image":"%s","status":"%s","state":"%s","health":"%s","ports":"%s","compose_project":"%s","age":"%s"}}}\n' \
+-      "ok" "$(solen_json_escape "$summary")" "$(solen_ts)" "$(solen_host)" \
+-      "$(solen_json_escape "$name")" "$id_short" "$(solen_json_escape "$image")" "$(solen_json_escape "$status")" "$state" "$health" "$(solen_json_escape "$ports")" "$(solen_json_escape "${compose:-}")" "$(solen_json_escape "$runningfor")"
+-  done <"$containers_tmp"
++    details=$(cat <<D
++"details":{"container":{"name":"$(solen_json_escape "$name")","id_short":"$id_short","image":"$(solen_json_escape "$image")","status":"$(solen_json_escape "$status")","state":"$state","health":"$health","ports":"$(solen_json_escape "$ports")","compose_project":"$(solen_json_escape "${compose:-}")","age":"$(solen_json_escape "$runningfor")"}}
++D
++)
++    solen_json_record_full ok "$summary" "$details"
++  done < "$containers_tmp"
+ 
+   # Emit per-image records
+   while IFS=$'\t' read -r repo tag id size_h; do
+     [[ -z "$id" ]] && continue
+-    images_total=$((images_total+1))
+-    id_short="${id#sha256:}"; id_short="${id_short:0:12}"
+-    dangling=false; [[ "$repo" == "<none>" || "$tag" == "<none>" ]] && dangling=true && images_dangling=$((images_dangling+1))
++    images_total=$((images_total + 1))
++    id_short="${id#sha256:}"
++    id_short="${id_short:0:12}"
++    dangling=false
++    [[ "$repo" == "<none>" || "$tag" == "<none>" ]] && dangling=true && images_dangling=$((images_dangling + 1))
+     # convert size to bytes
+     size_bytes=0
+     if [[ "$size_h" =~ ^([0-9.]+)([KMG]B)$ ]]; then
+-      num=${BASH_REMATCH[1]}; unit=${BASH_REMATCH[2]}
+-      case "$unit" in KB) mul=1024;; MB) mul=$((1024*1024));; GB) mul=$((1024*1024*1024));; *) mul=1;; esac
++      num=${BASH_REMATCH[1]}
++      unit=${BASH_REMATCH[2]}
++      case "$unit" in KB) mul=1024 ;; MB) mul=$((1024 * 1024)) ;; GB) mul=$((1024 * 1024 * 1024)) ;; *) mul=1 ;; esac
+       size_bytes=$(awk -v n="$num" -v m="$mul" 'BEGIN{ printf "%.0f", n*m }')
+     fi
+     summary="image ${repo}:${tag}"
+-    printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","details":{"image":{"repo":"%s","tag":"%s","id_short":"%s","size_bytes":%s,"dangling":%s}}}\n' \
+-      "ok" "$(solen_json_escape "$summary")" "$(solen_ts)" "$(solen_host)" \
+-      "$(solen_json_escape "$repo")" "$(solen_json_escape "$tag")" "$id_short" "$size_bytes" "$dangling"
+-  done <"$images_tmp"
++    details=$(cat <<D
++"details":{"image":{"repo":"$(solen_json_escape "$repo")","tag":"$(solen_json_escape "$tag")","id_short":"$id_short","size_bytes":$size_bytes,"dangling":$dangling}}
++D
++)
++    solen_json_record_full ok "$summary" "$details"
++  done < "$images_tmp"
+ 
+   # Rollup line
+   rollup="containers: ${containers_total} (running ${running}, unhealthy ${unhealthy}, exited ${exited}); images: ${images_total} (dangling ${images_dangling})"
+@@ -125,56 +160,3 @@ else
+ fi
+ 
+ exit 0
+-
+-# --- Colors (Optional) ---
+-COLOR_RESET='\033[0m'
+-COLOR_GREEN='\033[0;32m'
+-COLOR_CYAN='\033[0;36m'
+-COLOR_BLUE='\033[0;34m'
+-COLOR_RED='\033[0;31m'
+-
+-# --- Helper Functions ---
+-echoinfo() {
+-	echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
+-}
+-
+-echoheader() {
+-	echo -e "\n${COLOR_BLUE}--- $1 ---${COLOR_RESET}"
+-}
+-
+-echook() {
+-	echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
+-}
+-
+-echoerror() {
+-	echo -e "${COLOR_RED}❌ $1${COLOR_RESET}" >&2
+-}
+-
+-# --- Sanity Checks ---
+-command -v docker >/dev/null 2>&1 || {
+-	echoerror "Error: docker command not found. Is Docker installed and in your PATH?"
+-	exit 1
+-}
+-
+-# Check docker daemon connectivity
+-if ! docker info >/dev/null 2>&1; then
+-	echoerror "Cannot connect to the Docker daemon. Is the docker daemon running?"
+-	exit 1
+-fi
+-
+-# --- Main Logic ---
+-echoinfo "🐳ℹ️ Gathering Docker information..."
+-
+-# 1. Running Containers
+-echoheader "Running Containers"
+-docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}" || echoerror "Could not list running containers."
+-
+-# 2. Images
+-echoheader "Docker Images"
+-docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" || echoerror "Could not list Docker images."
+-
+-echo # Newline for spacing
+-
+-echook "✨ Docker information retrieval finished!"
+-
+-exit 0
+diff --git a/Scripts/docker/update-docker-compose-app.sh b/Scripts/docker/update-docker-compose-app.sh
+index 002908e..8dd655b 100755
+--- a/Scripts/docker/update-docker-compose-app.sh
++++ b/Scripts/docker/update-docker-compose-app.sh
+@@ -19,7 +19,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage: $0 [--dry-run] [--json] [--yes] <path_to_compose_dir>
+ 
+ Pull latest images and restart a Docker Compose app in the given directory.
+@@ -28,11 +28,24 @@ EOF
+ }
+ 
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
+   case "$1" in
+-    -h|--help) usage; exit 0 ;;
+-    --) shift; break ;;
+-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
++    -h | --help)
++      usage
++      exit 0
++      ;;
++    --)
++      shift
++      break
++      ;;
++    -*)
++      solen_err "unknown option: $1"
++      usage
++      exit 1
++      ;;
+     *) break ;;
+   esac
+ done
+@@ -46,12 +59,12 @@ fi
+ TARGET_DIR="$1"
+ 
+ # Dependencies and env checks
+-if ! command -v docker-compose >/dev/null 2>&1; then
++if ! command -v docker-compose > /dev/null 2>&1; then
+   solen_err "docker-compose not found"
+   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "docker-compose not found" "" "\"code\":2"
+   exit 2
+ fi
+-if ! command -v docker >/dev/null 2>&1; then
++if ! command -v docker > /dev/null 2>&1; then
+   solen_err "docker not found"
+   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "docker not found" "" "\"code\":2"
+   exit 2
+@@ -83,7 +96,8 @@ if ! solen_policy_allows_service_restart "docker"; then
+ fi
+ 
+ # Build actions list
+-actions=$(cat <<ACTIONS
++actions=$(
++  cat << ACTIONS
+ cd "$TARGET_DIR"
+ docker-compose -f "$COMPOSE_FILE" pull
+ docker-compose -f "$COMPOSE_FILE" up -d
+@@ -146,122 +160,4 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+ fi
+ exit 0
+ 
+-# --- Configuration ---
+-# Add any needed configuration variables here
+-
+-# --- Colors (Optional) ---
+-COLOR_RESET='\033[0m'
+-COLOR_GREEN='\033[0;32m'
+-COLOR_YELLOW='\033[0;33m'
+-COLOR_CYAN='\033[0;36m'
+-COLOR_RED='\033[0;31m'
+-
+-# --- Helper Functions ---
+-echoinfo() {
+-	echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
+-}
+-
+-echook() {
+-	echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
+-}
+-
+-echowarn() {
+-	echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
+-}
+-
+-echoerror() {
+-	echo -e "${COLOR_RED}❌ $1${COLOR_RESET}" >&2
+-}
+-
+-# --- Safety Warning ---
+-echowarn "!!!!!!!!!!!!!!!!!!!!!!!!!!!! WARNING !!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+-echowarn "This script pulls the latest images and restarts Docker containers"
+-echowarn "defined in a docker-compose.yml file. This can potentially break"
+-echowarn "your application if the new image has breaking changes or issues."
+-echowarn "USE WITH CAUTION and ensure you have backups or rollback plans."
+-echowarn "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+-echo
+-
+-# --- Argument Parsing ---
+-if [ $# -ne 1 ]; then
+-	echoerror "Usage: $0 <path_to_docker_compose_directory>"
+-	exit 1
+-fi
+-
+-TARGET_DIR="$1"
+-
+-# --- Sanity Checks ---
+-command -v docker-compose >/dev/null 2>&1 || {
+-	echoerror "Error: docker-compose command not found. Is it installed and in your PATH?"
+-	exit 1
+-}
+-
+-if [ ! -d "$TARGET_DIR" ]; then
+-	echoerror "Target directory not found: $TARGET_DIR"
+-	exit 1
+-fi
+-
+-COMPOSE_FILE="${TARGET_DIR}/docker-compose.yml"
+-if [ ! -f "$COMPOSE_FILE" ] && [ ! -f "${TARGET_DIR}/docker-compose.yaml" ]; then
+-	# Allow for .yaml extension as well
+-	COMPOSE_FILE="${TARGET_DIR}/docker-compose.yaml"
+-	if [ ! -f "$COMPOSE_FILE" ]; then
+-		echoerror "docker-compose.yml (or .yaml) not found in: $TARGET_DIR"
+-		exit 1
+-	fi
+-fi
+-
+-# Check docker daemon connectivity
+-if ! docker info >/dev/null 2>&1; then
+-	echoerror "Cannot connect to the Docker daemon. Is the docker daemon running?"
+-	exit 1
+-fi
+-
+-# --- Confirmation (Optional but Recommended) ---
+-read -r -p "Are you sure you want to update the stack in '${TARGET_DIR}'? (y/N): " confirm
+-if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+-	echoinfo "Aborted by user."
+-	exit 0
+-fi
+-
+-# --- Main Logic ---
+-echoinfo "🚀 Starting Docker Compose update for: ${TARGET_DIR}"
+-
+-ORIGINAL_DIR=$(pwd)
+-cd "$TARGET_DIR" || {
+-	echoerror "Could not change directory to $TARGET_DIR"
+-	exit 1
+-}
+-
+-HAS_ERRORS=0
+-
+-echoinfo "   -> 🚢 Pulling latest images defined in ${COMPOSE_FILE}..."
+-if docker-compose pull; then
+-	echook "      Image pull completed (or images were up-to-date)."
+-else
+-	echoerror "      Image pull failed."
+-	HAS_ERRORS=1
+-fi
+-
+-if [ $HAS_ERRORS -eq 0 ]; then
+-	echoinfo "   -> 🔄 Restarting application stack using 'docker-compose up -d'..."
+-	if docker-compose up -d; then
+-		echook "      Application stack restarted successfully."
+-	else
+-		echoerror "      Failed to restart application stack."
+-		HAS_ERRORS=1
+-	fi
+-fi
+-
+-# Return to original directory
+-cd "$ORIGINAL_DIR" || echowarn "Could not return to original directory: $ORIGINAL_DIR"
+-
+-echo # Newline for spacing
+-
+-if [ $HAS_ERRORS -eq 0 ]; then
+-	echook "✨ Docker Compose update process finished successfully!"
+-	exit 0
+-else
+-	echoerror "❌ Docker Compose update process finished with errors."
+-	exit 1
+-fi
++exit 0
+diff --git a/Scripts/health/check.sh b/Scripts/health/check.sh
+index 8d00c86..469249b 100755
+--- a/Scripts/health/check.sh
++++ b/Scripts/health/check.sh
+@@ -2,8 +2,8 @@
+ 
+ # SOLEN-META:
+ # name: health/check
+-# summary: Fast health checks with rollup (scaffold)
+-# requires: df,awk
++# summary: Fast health checks with thresholds and rollup (root,disk,load,mem,services,docker)
++# requires: df,awk,systemctl (optional),docker (optional)
+ # tags: health,monitoring
+ # verbs: check
+ # since: 0.1.0
+@@ -18,23 +18,139 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage: $(basename "$0") [--dry-run] [--json]
+ 
+-Performs fast health checks. This is a scaffold with placeholder metrics.
++Perform fast health checks using simple system probes and configurable thresholds (config/solen-health.yaml).
+ EOF
+ }
+ 
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
+-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) echo "unknown option: $1" >&2; usage; exit 1 ;; *) break;; esac
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
++  case "$1" in -h | --help)
++    usage
++    exit 0
++    ;;
++  --)
++    shift
++    break
++    ;;
++  -*)
++    echo "unknown option: $1" >&2
++    usage
++    exit 1
++    ;;
++  *) break ;; esac
+ done
+ 
++# --- thresholds and helpers ---
++ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
++HEALTH_CFG="${ROOT_DIR}/config/solen-health.yaml"
++
++num() { awk '{printf (NF? $1: 0)}' 2>/dev/null; }
++thres_or() {
++  # $1 key path (e.g., thresholds.disk_root_pct.warn) $2 default
++  local key="$1" def="$2"
++  [[ -r "$HEALTH_CFG" ]] || { printf '%s' "$def"; return; }
++  if command -v yq >/dev/null 2>&1; then
++    # translate dots to YAML path and try to read
++    local val
++    val=$(yq -r ".. | select(has(\"thresholds\")) | .thresholds | .${key#thresholds.} // empty" "$HEALTH_CFG" 2>/dev/null | head -n1)
++    if [[ -n "${val:-}" && "${val}" != "null" ]]; then printf '%s' "$val"; return; fi
++  fi
++  awk -v key="$key" -v def="$def" '
++    function trim(s){ gsub(/^\s+|\s+$/, "", s); return s }
++    BEGIN{FS=":"}
++    { line=$0 }
++    /thresholds:/ {t=1}
++    t && /disk_root_pct:/ {scope="disk_root_pct"}
++    t && /load15_per_core:/ {scope="load15_per_core"}
++    t && /mem_pressure_pct:/ {scope="mem_pressure_pct"}
++    t && scope && /warn:/ { w=trim($2) }
++    t && scope && /error:/ { e=trim($2) }
++    END {
++      split(key, parts, ".");
++      if(parts[2]=="disk_root_pct"){ if(parts[3]=="warn") print (w?w:def); else if(parts[3]=="error") print (e?e:def); else print def }
++      else if(parts[2]=="load15_per_core"){ if(parts[3]=="warn") print (w?w:def); else if(parts[3]=="error") print (e?e:def); else print def }
++      else if(parts[2]=="mem_pressure_pct"){ if(parts[3]=="warn") print (w?w:def); else if(parts[3]=="error") print (e?e:def); else print def }
++    }
++  ' "$HEALTH_CFG"
++}
++
++load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
++load5=$(awk '{print $2}' /proc/loadavg 2>/dev/null || echo 0)
++load15=$(awk '{print $3}' /proc/loadavg 2>/dev/null || echo 0)
++cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)
++if ! [[ "$cores" =~ ^[0-9]+$ ]]; then cores=1; fi
++load15_per_core=$(awk -v l="$load15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.2f", l/c }')
++
++# memory: used percent via MemAvailable
++read mem_total_k mem_avail_k < <(awk '/MemTotal:/{t=$2} /MemAvailable:/{a=$2} END{print t, a}' /proc/meminfo 2>/dev/null)
++mem_total_m=$(awk -v k="$mem_total_k" 'BEGIN{ printf "%.0f", k/1024 }')
++mem_avail_m=$(awk -v k="$mem_avail_k" 'BEGIN{ printf "%.0f", k/1024 }')
++mem_used_m=$(( mem_total_m - mem_avail_m ))
++mem_pressure_pct=$(awk -v u="$mem_used_m" -v t="$mem_total_m" 'BEGIN{ if(t<=0){print 0}else{printf "%.1f", (u*100)/t} }')
++
++# disk root percent
++disk_root_pct=$(df -P -BG / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5+0}' || echo 0)
++
++# services allow list (optional)
++services_allow=()
++if [[ -r "$HEALTH_CFG" ]]; then
++  # supports YAML inline list: services: allow: ["sshd", "cron"]
++  inline=$(awk '/services:/,0{ if($0 ~ /allow:/){ print; exit } }' "$HEALTH_CFG" | awk -F'\[' '{print $2}' | awk -F']' '{print $1}')
++  if [[ -n "$inline" ]]; then
++    # split by comma
++    IFS=',' read -r -a services_allow <<< "${inline}"
++    # strip quotes/spaces
++    for i in "${!services_allow[@]}"; do services_allow[$i]="$(echo "${services_allow[$i]}" | sed "s/'//g; s/\"//g; s/^ *//; s/ *$//")"; done
++  fi
++fi
++
++failed_services=0
++if command -v systemctl >/dev/null 2>&1 && [[ ${#services_allow[@]} -gt 0 ]]; then
++  for s in "${services_allow[@]}"; do
++    [[ -z "$s" ]] && continue
++    if systemctl is-enabled --quiet "$s" 2>/dev/null; then
++      if ! systemctl is-active --quiet "$s" 2>/dev/null; then
++        failed_services=$((failed_services+1))
++      fi
++    fi
++  done
++fi
++
++unhealthy_containers=0
++if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
++  unhealthy_containers=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -i '\(unhealthy\)' | wc -l | awk '{print $1+0}')
++fi
++
++# thresholds
++thr_disk_warn=$(thres_or thresholds.disk_root_pct.warn 85 | num)
++thr_disk_err=$(thres_or thresholds.disk_root_pct.error 95 | num)
++thr_load_warn=$(thres_or thresholds.load15_per_core.warn 1.0)
++thr_load_err=$(thres_or thresholds.load15_per_core.error 2.0)
++thr_mem_warn=$(thres_or thresholds.mem_pressure_pct.warn 70)
++thr_mem_err=$(thres_or thresholds.mem_pressure_pct.error 85)
++
++# status computation
++st="ok"
++violations=()
++cmp() { awk -v a="$1" -v b="$2" 'BEGIN{ if(a>b) exit 0; else exit 1 }'; }
++if cmp "$disk_root_pct" "$thr_disk_err" || cmp "$load15_per_core" "$thr_load_err" || cmp "$mem_pressure_pct" "$thr_mem_err" || [[ $failed_services -gt 0 ]] || [[ $unhealthy_containers -gt 0 ]]; then
++  st="error"
++elif cmp "$disk_root_pct" "$thr_disk_warn" || cmp "$load15_per_core" "$thr_load_warn" || cmp "$mem_pressure_pct" "$thr_mem_warn"; then
++  st="warn"
++fi
++
++summary="disk ${disk_root_pct}%, load ${load15_per_core}/core, mem ${mem_pressure_pct}%, svc_failed ${failed_services}, containers_unhealthy ${unhealthy_containers}"
++
+ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+-  # Rollup with placeholder metrics
+-  solen_json_record ok "health OK: disk 0%, load 0/core, services green" "" "\"disk_root_pct\":0,\"load15_per_core\":0,\"mem_pressure_pct\":0,\"unhealthy_containers\":0,\"failed_services\":0"
++  solen_json_record "$st" "$summary" "" \
++    "\"metrics\":{\"disk_root_pct\":${disk_root_pct},\"load15_per_core\":${load15_per_core},\"mem_pressure_pct\":${mem_pressure_pct},\"unhealthy_containers\":${unhealthy_containers},\"failed_services\":${failed_services},\"cores\":${cores},\"load15\":${load15}}"
+ else
+-  solen_ok "health OK: disk 0%, load 0/core, services green"
++  case "$st" in ok) solen_ok "$summary" ;; warn) solen_warn "$summary" ;; *) solen_err "$summary" ;; esac
+ fi
+-exit 0
+-
++exit $([[ "$st" = "ok" ]] && echo 0 || ([[ "$st" = "warn" ]] && echo 0 || echo 1))
+diff --git a/Scripts/log-management/clear-logs.sh b/Scripts/log-management/clear-logs.sh
+index fc4188a..93392d5 100755
+--- a/Scripts/log-management/clear-logs.sh
++++ b/Scripts/log-management/clear-logs.sh
+@@ -19,7 +19,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage: $0 [--dry-run] [--json] [--yes]
+ 
+ Vacuum journald by size/time and optionally truncate configured log files.
+@@ -28,8 +28,24 @@ EOF
+ }
+ 
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
+-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) solen_err "unknown option: $1"; usage; exit 1 ;; *) break;; esac
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
++  case "$1" in -h | --help)
++    usage
++    exit 0
++    ;;
++  --)
++    shift
++    break
++    ;;
++  -*)
++    solen_err "unknown option: $1"
++    usage
++    exit 1
++    ;;
++  *) break ;; esac
+ done
+ 
+ # --- Configuration ---
+@@ -37,9 +53,9 @@ JOURNALD_VACUUM_SIZE="100M" # Keep logs up to this total size
+ JOURNALD_VACUUM_TIME="7d"   # Keep logs up to this age (e.g., 3d, 7d, 2weeks)
+ 
+ TRUNCATE_LOGS=( # List of log files to truncate (set size to 0)
+-	# "/var/log/syslog"      # Example: uncomment or add logs you want truncated
+-	# "/var/log/nginx/access.log"
+-	# "/var/log/nginx/error.log"
++  # "/var/log/syslog"      # Example: uncomment or add logs you want truncated
++  # "/var/log/nginx/access.log"
++  # "/var/log/nginx/error.log"
+ )
+ 
+ # --- Colors (Optional) ---
+@@ -51,26 +67,26 @@ COLOR_RED='\033[0;31m'
+ 
+ # --- Helper Functions ---
+ echoinfo() {
+-	echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
++  echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
+ }
+ 
+ echook() {
+-	echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
++  echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
+ }
+ 
+ echowarn() {
+-	echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
++  echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
+ }
+ 
+ echoerror() {
+-	echo -e "${COLOR_RED}❌ $1${COLOR_RESET}" >&2
++  echo -e "${COLOR_RED}❌ $1${COLOR_RESET}" >&2
+ }
+ 
+ # --- Sanity Checks ---
+ if [[ $EUID -ne 0 && $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
+-    solen_warn "needs root (use sudo)"
+-    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "needs root" "" "\"code\":2"
+-    exit 2
++  solen_warn "needs root (use sudo)"
++  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "needs root" "" "\"code\":2"
++  exit 2
+ fi
+ 
+ # --- Main Logic ---
+@@ -80,45 +96,46 @@ solen_info "starting log cleanup"
+ changed_count=0
+ actions_list=""
+ 
+-if command -v journalctl >/dev/null 2>&1; then
+-    solen_info "vacuum journald (time ${JOURNALD_VACUUM_TIME}, size ${JOURNALD_VACUUM_SIZE})"
+-    actions_list+="journalctl --vacuum-size=${JOURNALD_VACUUM_SIZE} --vacuum-time=${JOURNALD_VACUUM_TIME}
++if command -v journalctl > /dev/null 2>&1; then
++  solen_info "vacuum journald (time ${JOURNALD_VACUUM_TIME}, size ${JOURNALD_VACUUM_SIZE})"
++  actions_list+="journalctl --vacuum-size=${JOURNALD_VACUUM_SIZE} --vacuum-time=${JOURNALD_VACUUM_TIME}
+ "
+-    if [[ $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
+-      journalctl --vacuum-size=${JOURNALD_VACUUM_SIZE} --vacuum-time=${JOURNALD_VACUUM_TIME}
+-      changed_count=$((changed_count+1))
+-    fi
++  if [[ $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
++    journalctl --vacuum-size=${JOURNALD_VACUUM_SIZE} --vacuum-time=${JOURNALD_VACUUM_TIME}
++    changed_count=$((changed_count + 1))
++  fi
+ else
+-    solen_warn "journalctl not found, skipping vacuum"
++  solen_warn "journalctl not found, skipping vacuum"
+ fi
+ 
+ # 2. Truncate Specific Log Files
+ if [ ${#TRUNCATE_LOGS[@]} -gt 0 ]; then
+-    solen_info "truncate configured log files"
+-    for log_file in "${TRUNCATE_LOGS[@]}"; do
+-        if [ -f "$log_file" ]; then
+-            # Policy check per file
+-            if ! solen_policy_allows_prune_path "$log_file"; then
+-                solen_warn "policy denies truncating: $log_file"
+-                [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "policy denies truncating $log_file" "truncate -s 0 $log_file" "\"code\":4"
+-                exit 4
+-            fi
+-            actions_list+="truncate -s 0 $log_file
++  solen_info "truncate configured log files"
++  for log_file in "${TRUNCATE_LOGS[@]}"; do
++    if [ -f "$log_file" ]; then
++      # Policy check per file
++      if ! solen_policy_allows_prune_path "$log_file"; then
++        solen_warn "policy denies truncating: $log_file"
++        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "policy denies truncating $log_file" "truncate -s 0 $log_file" "\"code\":4"
++        exit 4
++      fi
++      actions_list+="truncate -s 0 $log_file
+ "
+-            if [[ $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
+-              : "${USE_SUDO:=}"; [[ $EUID -ne 0 ]] && USE_SUDO="sudo" || USE_SUDO=""
+-              $USE_SUDO truncate -s 0 "$log_file"
+-              changed_count=$((changed_count+1))
+-              solen_ok "truncated $log_file"
+-            else
+-              solen_info "would truncate $log_file"
+-            fi
+-        else
+-            solen_warn "log not found: ${log_file}"
+-        fi
+-    done
++      if [[ $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
++        : "${USE_SUDO:=}"
++        [[ $EUID -ne 0 ]] && USE_SUDO="sudo" || USE_SUDO=""
++        $USE_SUDO truncate -s 0 "$log_file"
++        changed_count=$((changed_count + 1))
++        solen_ok "truncated $log_file"
++      else
++        solen_info "would truncate $log_file"
++      fi
++    else
++      solen_warn "log not found: ${log_file}"
++    fi
++  done
+ else
+-    solen_info "no specific logs configured for truncation"
++  solen_info "no specific logs configured for truncation"
+ fi
+ 
+ echo # Newline for spacing
+diff --git a/Scripts/network/network-info.sh b/Scripts/network/network-info.sh
+index cbdccdc..c7dbfad 100755
+--- a/Scripts/network/network-info.sh
++++ b/Scripts/network/network-info.sh
+@@ -19,7 +19,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage: $0 [--dry-run] [--json]
+ 
+ Show network interfaces, listening ports, and a quick connectivity check. Read-only.
+@@ -27,15 +27,31 @@ EOF
+ }
+ 
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
+-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) solen_err "unknown option: $1"; usage; exit 1 ;; *) break;; esac
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
++  case "$1" in -h | --help)
++    usage
++    exit 0
++    ;;
++  --)
++    shift
++    break
++    ;;
++  -*)
++    solen_err "unknown option: $1"
++    usage
++    exit 1
++    ;;
++  *) break ;; esac
+ done
+ 
+ gateway=""
+ default_iface=""
+-if command -v ip >/dev/null 2>&1; then
++if command -v ip > /dev/null 2>&1; then
+   # Detect default route
+-  if ip route show default 2>/dev/null | grep -q '^default'; then
++  if ip route show default 2> /dev/null | grep -q '^default'; then
+     gateway=$(ip route show default | awk '/^default/ {print $3; exit}')
+     default_iface=$(ip route show default | awk '/^default/ {print $5; exit}')
+   fi
+@@ -49,20 +65,21 @@ ifaces_tmp=$(mktemp)
+ ports_tmp=$(mktemp)
+ trap 'rm -f "$ifaces_tmp" "$ports_tmp"' EXIT
+ 
+-ip -brief address show >"$ifaces_tmp" 2>/dev/null || true
++ip -brief address show > "$ifaces_tmp" 2> /dev/null || true
+ 
+ ports_available=0
+-if command -v ss >/dev/null 2>&1; then
+-  ss -tulnp 2>/dev/null >"$ports_tmp" && ports_available=1 || ports_available=0
++if command -v ss > /dev/null 2>&1; then
++  ss -tulnp 2> /dev/null > "$ports_tmp" && ports_available=1 || ports_available=0
+ fi
+ 
+ # Connectivity
+-gateway_ok="false"; rtt_ms=""
++gateway_ok="false"
++rtt_ms=""
+ if [[ -n "$gateway" ]]; then
+-  if ping -c 1 -W 1 "$gateway" >/dev/null 2>&1; then
++  if ping -c 1 -W 1 "$gateway" > /dev/null 2>&1; then
+     gateway_ok="true"
+     # Try to measure RTT quickly
+-    rtt_ms=$(ping -c 1 -W 1 "$gateway" 2>/dev/null | awk -F'/' '/^rtt/ {print $5; exit}')
++    rtt_ms=$(ping -c 1 -W 1 "$gateway" 2> /dev/null | awk -F'/' '/^rtt/ {print $5; exit}')
+   fi
+ fi
+ 
+@@ -71,17 +88,20 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+   while IFS= read -r line; do
+     [[ -z "$line" ]] && continue
+     # format: IFACE STATE ADDRS...
+-    name=$(awk '{print $1}' <<<"$line")
+-    state=$(awk '{print $2}' <<<"$line")
++    name=$(awk '{print $1}' <<< "$line")
++    state=$(awk '{print $2}' <<< "$line")
+     addrs=$(echo "$line" | cut -d' ' -f3-)
+     # mac
+-    mac=$(ip link show dev "$name" 2>/dev/null | awk '/link\// {print $2; exit}')
+-    is_default="false"; [[ "$name" == "$default_iface" ]] && is_default="true"
++    mac=$(ip link show dev "$name" 2> /dev/null | awk '/link\// {print $2; exit}')
++    is_default="false"
++    [[ "$name" == "$default_iface" ]] && is_default="true"
+     summary="iface ${name} ${state}"
+-    printf '{"status":"ok","summary":"%s","ts":"%s","host":"%s","details":{"interface":{"name":"%s","state":"%s","mac":"%s","addr":"%s","default_route":%s}}}\n' \
+-      "$(solen_json_escape "$summary")" "$(solen_ts)" "$(solen_host)" \
+-      "$(solen_json_escape "$name")" "$(solen_json_escape "$state")" "$(solen_json_escape "${mac:-}")" "$(solen_json_escape "$addrs")" "$is_default"
+-  done <"$ifaces_tmp"
++    details=$(cat <<D
++"details":{"interface":{"name":"$(solen_json_escape "$name")","state":"$(solen_json_escape "$state")","mac":"$(solen_json_escape "${mac:-}")","addr":"$(solen_json_escape "$addrs")","default_route":$is_default}}
++D
++)
++    solen_json_record_full ok "$summary" "$details"
++  done < "$ifaces_tmp"
+ 
+   # Ports (if available)
+   ports_count=0
+@@ -89,19 +109,23 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+     # skip header lines, print protocol, local address:port, process (if present)
+     awk 'NR>1 {print}' "$ports_tmp" | while IFS= read -r pline; do
+       [[ -z "$pline" ]] && continue
+-      proto=$(awk '{print $1}' <<<"$pline")
+-      localaddr=$(awk '{print $5}' <<<"$pline")
+-      proc=$(awk -F 'users:\(\("' '{print $2}' <<<"$pline" | awk -F '"' '{print $1}' 2>/dev/null)
+-      ports_count=$((ports_count+1))
+-      printf '{"status":"ok","summary":"port %s %s","ts":"%s","host":"%s","details":{"port":{"proto":"%s","local":"%s","process":"%s"}}}\n' \
+-        "$proto" "$localaddr" "$(solen_ts)" "$(solen_host)" "$proto" "$localaddr" "$(solen_json_escape "${proc:-}")"
++      proto=$(awk '{print $1}' <<< "$pline")
++      localaddr=$(awk '{print $5}' <<< "$pline")
++      proc=$(awk -F 'users:\(\("' '{print $2}' <<< "$pline" | awk -F '"' '{print $1}' 2> /dev/null)
++      ports_count=$((ports_count + 1))
++      summary="port ${proto} ${localaddr}"
++      details=$(cat <<D
++"details":{"port":{"proto":"$proto","local":"$localaddr","process":"$(solen_json_escape "${proc:-}")"}}
++D
++)
++      solen_json_record_full ok "$summary" "$details"
+     done
+   fi
+ 
+   # Rollup
+   up_count=$(awk '{print $2}' "$ifaces_tmp" | grep -c '^UP$' || true)
+-  total_count=$(wc -l <"$ifaces_tmp")
+-  rollup="interfaces: ${up_count} up / ${total_count} total; default route via ${gateway:-unknown}; listening ports: ${ports_count}; connectivity: gateway $( [[ $gateway_ok == "true" ]] && echo OK || echo FAIL )"
++  total_count=$(wc -l < "$ifaces_tmp")
++  rollup="interfaces: ${up_count} up / ${total_count} total; default route via ${gateway:-unknown}; listening ports: ${ports_count}; connectivity: gateway $([[ $gateway_ok == "true" ]] && echo OK || echo FAIL)"
+   metrics_kv="\"if_up\":${up_count},\"if_total\":${total_count},\"listening\":${ports_count},\"gateway_ok\":$([[ $gateway_ok == "true" ]] && echo true || echo false)"
+   if [[ -n "$rtt_ms" ]]; then metrics_kv+=" ,\"rtt_ms\":${rtt_ms}"; fi
+   solen_json_record ok "$rollup" "" "$metrics_kv"
+@@ -118,60 +142,4 @@ fi
+ 
+ exit 0
+ 
+-# --- Configuration ---
+-PING_TARGET="1.1.1.1" # Host to ping for connectivity check
+-PING_COUNT=3
+-
+-# --- Colors (Optional) ---
+-COLOR_RESET='\033[0m'
+-COLOR_GREEN='\033[0;32m'
+-COLOR_YELLOW='\033[0;33m'
+-COLOR_CYAN='\033[0;36m'
+-COLOR_BLUE='\033[0;34m'
+-
+-# --- Helper Functions ---
+-echoinfo() {
+-	echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
+-}
+-
+-echoheader() {
+-	echo -e "\n${COLOR_BLUE}--- $1 ---${COLOR_RESET}"
+-}
+-
+-echook() {
+-	echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
+-}
+-
+-echowarn() {
+-	echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
+-}
+-
+-# --- Main Logic ---
+-echoinfo "🌐 Gathering network information..."
+-
+-# 1. IP Addresses
+-echoheader "IP Addresses"
+-ip -brief address show || echowarn "Could not retrieve IP addresses using 'ip -brief address show'."
+-
+-# 2. Listening Ports
+-echoheader "Listening Ports (TCP/UDP)"
+-if command -v ss >/dev/null 2>&1; then
+-	ss -tulnp || echowarn "Could not retrieve listening ports using 'ss -tulnp'."
+-else
+-	echowarn "ss command not found (needed to list ports). Try installing 'iproute2'."
+-fi
+-
+-# 3. Connectivity Check
+-echoheader "Connectivity Check"
+-echoinfo "   Pinging ${PING_TARGET} (${PING_COUNT} times)..."
+-if ping -c ${PING_COUNT} ${PING_TARGET} >/dev/null 2>&1; then
+-	echook "   Ping to ${PING_TARGET} successful."
+-else
+-	echowarn "   Ping to ${PING_TARGET} failed."
+-fi
+-
+-echo # Newline for spacing
+-
+-echook "✨ Network information retrieval finished!"
+-
+ exit 0
+diff --git a/Scripts/system-maintenance/cleanup-system.sh b/Scripts/system-maintenance/cleanup-system.sh
+index 2a23eb8..1f23f24 100755
+--- a/Scripts/system-maintenance/cleanup-system.sh
++++ b/Scripts/system-maintenance/cleanup-system.sh
+@@ -25,26 +25,26 @@ COLOR_CYAN='\033[0;36m'
+ 
+ # --- Helper Functions ---
+ echoinfo() {
+-	echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
++  echo -e "${COLOR_CYAN}ℹ️  $1${COLOR_RESET}"
+ }
+ 
+ echook() {
+-	echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
++  echo -e "${COLOR_GREEN}✅ $1${COLOR_RESET}"
+ }
+ 
+ echowarn() {
+-	echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
++  echo -e "${COLOR_YELLOW}⚠️  $1${COLOR_RESET}"
+ }
+ 
+ # --- Sanity Checks ---
+ if [[ $EUID -ne 0 ]]; then
+-	echowarn "This script needs to be run as root (use sudo)."
+-	exit 1
++  echowarn "This script needs to be run as root (use sudo)."
++  exit 1
+ fi
+ 
+-command -v apt >/dev/null 2>&1 || {
+-	echo >&2 "Error: apt command not found. This script requires a Debian-based system."
+-	exit 1
++command -v apt > /dev/null 2>&1 || {
++  echo >&2 "Error: apt command not found. This script requires a Debian-based system."
++  exit 1
+ }
+ 
+ # --- Main Logic ---
+diff --git a/Scripts/system-maintenance/update-and-report.sh b/Scripts/system-maintenance/update-and-report.sh
+index 325afb3..344dbc4 100755
+--- a/Scripts/system-maintenance/update-and-report.sh
++++ b/Scripts/system-maintenance/update-and-report.sh
+@@ -18,7 +18,7 @@ THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ solen_init_flags
+ 
+ usage() {
+-  cat <<EOF
++  cat << EOF
+ Usage: $0 [--dry-run] [--json] [--yes]
+ 
+ Refresh apt indexes, attempt fix-broken, upgrade packages, and report recently upgraded packages.
+@@ -26,17 +26,34 @@ EOF
+ }
+ 
+ while [[ $# -gt 0 ]]; do
+-  if solen_parse_common_flag "$1"; then shift; continue; fi
+-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) echo "unknown option: $1" >&2; usage; exit 1 ;; *) break;; esac
++  if solen_parse_common_flag "$1"; then
++    shift
++    continue
++  fi
++  case "$1" in -h | --help)
++    usage
++    exit 0
++    ;;
++  --)
++    shift
++    break
++    ;;
++  -*)
++    echo "unknown option: $1" >&2
++    usage
++    exit 1
++    ;;
++  *) break ;; esac
+ done
+ 
+-if ! command -v apt >/dev/null 2>&1; then
++if ! command -v apt > /dev/null 2>&1; then
+   solen_err "apt not found"
+   [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "apt not found" "" "\"code\":2"
+   exit 2
+ fi
+ 
+-actions=$(cat <<A
++actions=$(
++  cat << A
+ sudo apt update
+ sudo apt --fix-broken install -y
+ sudo apt upgrade -y
+diff --git a/asciiart.ascii b/asciiart.ascii
+index 462c996..fc6fcbd 100644
+--- a/asciiart.ascii
++++ b/asciiart.ascii
+@@ -1,8 +1,19 @@
+- ____   ___   _       _____  _   _ 
+-/ ___| / _ \ | |     | ____|| \ | |
+-\___ \| | | || |     |  _|  |  \| |
+- ___) | |_| || |___  | |___ | |\  |
+-|____/ \__\_\|_____| |_____||_| \_|
++⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣤⣤⣤⣤⡼⠀⢀⡀⣀⢱⡄⡀⠀⠀⠀⢲⣤⣤⣤⣤⣀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
++⠀⠀⠀⠀⠀⠀⠀⠀⠀⣠⣴⣾⣿⣿⣿⣿⣿⡿⠛⠋⠁⣤⣿⣿⣿⣧⣷⠀⠀⠘⠉⠛⢻⣷⣿⣽⣿⣿⣷⣦⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀
++⠀⠀⠀⠀⠀⠀⢀⣴⣞⣽⣿⣿⣿⣿⣿⣿⣿⠁⠀⠀⠠⣿⣿⡟⢻⣿⣿⣇⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣿⣿⣿⣟⢦⡀⠀⠀⠀⠀⠀⠀
++⠀⠀⠀⠀⠀⣠⣿⡾⣿⣿⣿⣿⣿⠿⣻⣿⣿⡀⠀⠀⠀⢻⣿⣷⡀⠻⣧⣿⠆⠀⠀⠀⠀⣿⣿⣿⡻⣿⣿⣿⣿⣿⠿⣽⣦⡀⠀⠀⠀⠀
++⠀⠀⠀⠀⣼⠟⣩⣾⣿⣿⣿⢟⣵⣾⣿⣿⣿⣧⠀⠀⠀⠈⠿⣿⣿⣷⣈⠁⠀⠀⠀⠀⣰⣿⣿⣿⣿⣮⣟⢯⣿⣿⣷⣬⡻⣷⡄⠀⠀⠀
++⠀⠀⢀⡜⣡⣾⣿⢿⣿⣿⣿⣿⣿⢟⣵⣿⣿⣿⣷⣄⠀⣰⣿⣿⣿⣿⣿⣷⣄⠀⢀⣼⣿⣿⣿⣷⡹⣿⣿⣿⣿⣿⣿⢿⣿⣮⡳⡄⠀⠀
++⠀⢠⢟⣿⡿⠋⣠⣾⢿⣿⣿⠟⢃⣾⢟⣿⢿⣿⣿⣿⣾⡿⠟⠻⣿⣻⣿⣏⠻⣿⣾⣿⣿⣿⣿⡛⣿⡌⠻⣿⣿⡿⣿⣦⡙⢿⣿⡝⣆⠀
++⠀⢯⣿⠏⣠⠞⠋⠀⣠⡿⠋⢀⣿⠁⢸⡏⣿⠿⣿⣿⠃⢠⣴⣾⣿⣿⣿⡟⠀⠘⢹⣿⠟⣿⣾⣷⠈⣿⡄⠘⢿⣦⠀⠈⠻⣆⠙⣿⣜⠆
++⢀⣿⠃⡴⠃⢀⡠⠞⠋⠀⠀⠼⠋⠀⠸⡇⠻⠀⠈⠃⠀⣧⢋⣼⣿⣿⣿⣷⣆⠀⠈⠁⠀⠟⠁⡟⠀⠈⠻⠀⠀⠉⠳⢦⡀⠈⢣⠈⢿⡄
++⣸⠇⢠⣷⠞⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠻⠿⠿⠋⠀⢻⣿⡄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠙⢾⣆⠈⣷
++⡟⠀⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣴⣶⣤⡀⢸⣿⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢻⡄⢹
++⡇⠀⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡇⠀⠈⣿⣼⡟⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠃⢸
++⢡⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠻⠶⣶⡟⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⡼
++⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡾⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠁
++⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡁⢠⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
++⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣿⣿⣼⣀⣠⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+ 
+ o> SOLEN 0.1.0 — Aegir
+ Server Utilities Runner
+diff --git a/config/solen-health.yaml b/config/solen-health.yaml
+index b505233..642e59e 100644
+--- a/config/solen-health.yaml
++++ b/config/solen-health.yaml
+@@ -1,4 +1,8 @@
+ # SOLEN Health thresholds (scaffold)
++# Parser behavior:
++#  - If 'yq' is installed, thresholds are read via yq (supports standard YAML).
++#  - If 'yq' is not present, a lightweight awk fallback supports the inline
++#    shapes used below (flat threshold keys and inline service allow list).
+ 
+ thresholds:
+   disk_root_pct:
+@@ -11,5 +15,5 @@ thresholds:
+     warn: 70
+     error: 85
+ services:
++  # Inline list supported by awk fallback; multiline lists are supported when yq is available
+   allow: ["sshd", "cron", "docker", "jellyfin"]
+-
+diff --git a/docs/PLAYBOOKS.md b/docs/PLAYBOOKS.md
+index c1a12b6..0ffd453 100644
+--- a/docs/PLAYBOOKS.md
++++ b/docs/PLAYBOOKS.md
+@@ -12,6 +12,13 @@
+ 4. Health check
+    - `serverutils run health/check -- --json`
+ 
++## Security posture
++
++1. Baseline security review (read-only)
++   - `serverutils run security/baseline-check -- --json`
++2. Firewall status
++   - `serverutils run security/firewall-status -- --json`
++
+ ## Docker roll (single app)
+ 
+ 1. Inspect Docker state
+@@ -21,4 +28,3 @@
+    - `serverutils run docker/update-docker-compose-app -- /srv/app`
+ 3. Health check
+    - `serverutils run health/check -- --json`
+-
+diff --git a/docs/json-schema/solen.script.schema.json b/docs/json-schema/solen.script.schema.json
+index 9867736..19135c2 100644
+--- a/docs/json-schema/solen.script.schema.json
++++ b/docs/json-schema/solen.script.schema.json
+@@ -8,6 +8,7 @@
+   "properties": {
+     "status": { "type": "string", "enum": ["ok", "warn", "error"] },
+     "summary": { "type": "string" },
++    "op": { "type": "string" },
+     "details": { "type": "object", "additionalProperties": true },
+     "metrics": {
+       "type": "object",
+@@ -29,4 +30,3 @@
+     "key": { "type": "string" }
+   }
+ }
+-
+diff --git a/serverutils b/serverutils
+index 7ada768..5d56ea8 100755
+--- a/serverutils
++++ b/serverutils
+@@ -11,7 +11,24 @@ IFS=$'\n\t'
+ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ SCRIPTS_DIR="${ROOT_DIR}/Scripts"
+ # Audit path selection with env overrides
+-DEFAULT_AUDIT_DIR="${ROOT_DIR}/.serverutils"
++SCHEMA_VERSION="1.0.0"
++
++# Audit/log directory precedence
++# 1) SOLEN_AUDIT_LOG explicit file overrides all
++# 2) SOLEN_LOG_DIR (new) overrides default directory
++# 3) If root/system: /var/log/solen ; else: ~/.local/share/solen
++# 4) SOLEN_AUDIT_DIR overrides chosen directory from (2)/(3)
++_DEFAULT_LOG_DIR_USER="${HOME}/.local/share/solen"
++_DEFAULT_LOG_DIR_SYSTEM="/var/log/solen"
++_BASE_LOG_DIR="${SOLEN_LOG_DIR:-}"
++if [[ -z "${_BASE_LOG_DIR}" ]]; then
++  if [[ ${EUID:-$(id -u 2>/dev/null || echo 1000)} -eq 0 ]]; then
++    _BASE_LOG_DIR="${_DEFAULT_LOG_DIR_SYSTEM}"
++  else
++    _BASE_LOG_DIR="${_DEFAULT_LOG_DIR_USER}"
++  fi
++fi
++DEFAULT_AUDIT_DIR="${_BASE_LOG_DIR}"
+ AUDIT_DIR="${SOLEN_AUDIT_DIR:-$DEFAULT_AUDIT_DIR}"
+ AUDIT_LOG="${SOLEN_AUDIT_LOG:-${AUDIT_DIR}/audit.log}"
+ VERSION="0.1.0"
+@@ -35,6 +52,10 @@ timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+ ensure_audit() {
+   mkdir -p "${AUDIT_DIR}" || true
+   touch "${AUDIT_LOG}" || true
++  if [[ -z "${_SOLEN_AUDIT_ANNOUNCED:-}" ]]; then
++    echoinfo "audit log: ${AUDIT_LOG}"
++    _SOLEN_AUDIT_ANNOUNCED=1
++  fi
+ }
+ 
+ audit_log() {
+@@ -211,23 +232,55 @@ cmd_home() {
+       command -v clear >/dev/null 2>&1 && clear || true
+       [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && { cat "${ROOT_DIR}/asciiart.ascii"; echo; }
+       echo "SOLEN Runner — choose an action:"
+-      echo "  1) List scripts with summaries"
+-      echo "  2) Network inventory (IPs, ports, ping)"
++      echo "  1) List scripts (then run)"
++      echo "  2) Search scripts (then run)"
+       echo "  3) Health check"
+       echo "  4) Apt update/upgrade (dry-run)"
+       echo "  5) Install runner (user)"
+       echo "  6) Overview"
++      echo "  7) Setup MOTD (print snippet)"
++      echo "  r) Run a script by key/name"
+       echo "  q) Quit"
+       printf "> "
+       local choice
+       read -r choice
+       case "$choice" in
+-        1) cmd_list; ;;
+-        2) cmd_run network/network-info; ;;
++        1)
++          cmd_list
++          echo
++          printf "Enter key/name to run (blank to return): "
++          read -r runkey
++          if [[ -n "$runkey" ]]; then
++            printf "Extra args (after --), or blank: "
++            read -r extra
++            if [[ -n "$extra" ]]; then cmd_run "$runkey" -- $extra; else cmd_run "$runkey"; fi
++          fi
++          ;;
++        2)
++          printf "Search query: "
++          read -r q
++          if [[ -n "$q" ]]; then
++            resolved="$(resolve_script_by_key_or_name "$q")"
++            if [[ -z "$resolved" ]]; then echoerr "No matches"; else
++              chosen="$(printf '%s\n' "$resolved" | choose_interactively)"
++              [[ -n "$chosen" ]] && cmd_run "$chosen"
++            fi
++          fi
++          ;;
++        r|R)
++          printf "Enter key/name to run: "
++          read -r runkey
++          if [[ -n "$runkey" ]]; then
++            printf "Extra args (after --), or blank: "
++            read -r extra
++            if [[ -n "$extra" ]]; then cmd_run "$runkey" -- $extra; else cmd_run "$runkey"; fi
++          fi
++          ;;
+         3) cmd_run health/check; ;;
+         4) cmd_run system-maintenance/update-and-report -- --dry-run; ;;
+         5) cmd_install_runner --user; ;;
+         6) cmd_overview; ;;
++        7) cmd_setup_motd; ;;
+         q|Q|"" ) break ;;
+         *) echoerr "Unknown choice" ;;
+       esac
+@@ -579,6 +632,75 @@ cmd_uninstall_scripts() {
+   audit_log "UNINSTALL_SCRIPTS scope=${scope} dir=${bindir} prefix=${prefix} user=${USER:-unknown} removed=${removed}"
+ }
+ 
++cmd_install_units() {
++  local scope="user" force=0
++  while [[ $# -gt 0 ]]; do
++    case "$1" in
++      --global) scope="global"; shift ;;
++      --user) scope="user"; shift ;;
++      --force) force=1; shift ;;
++      *) echoerr "Unknown option: $1"; exit 2 ;;
++    esac
++  done
++  local dest
++  if [[ "$scope" == "global" ]]; then
++    dest="/etc/systemd/system"
++  else
++    dest="${HOME}/.config/systemd/user"
++  fi
++  mkdir -p "$dest"
++  local installed=0
++  for f in "$ROOT_DIR"/systemd/*.{service,timer}; do
++    [[ -f "$f" ]] || continue
++    local base="$(basename "$f")"
++    local target="$dest/$base"
++    if [[ -e "$target" && $force -ne 1 ]]; then
++      echowarn "Exists (skip): $target"
++      continue
++    fi
++    if [[ "$scope" == "global" ]]; then
++      sed -e 's#append:%h/.local/share/solen#append:/var/log/solen#g' \
++          -e '/^ExecStartPre=.*mkdir -p/s#%h/.local/share/solen#/var/log/solen#' \
++          "$f" > "$target.tmp"
++      if ! grep -q '^ExecStartPre=.*/var/log/solen' "$target.tmp"; then
++        awk '1; $0=="[Service]" {print "ExecStartPre=/usr/bin/env mkdir -p /var/log/solen"}' "$target.tmp" > "$target"
++        rm -f "$target.tmp"
++      else
++        mv "$target.tmp" "$target"
++      fi
++    else
++      cp -f "$f" "$target"
++    fi
++    installed=$((installed+1))
++  done
++  echook "Installed ${installed} unit files to $dest"
++  if [[ "$scope" == "user" ]]; then
++    echo "  Next: systemctl --user daemon-reload"
++  else
++    echo "  Next: sudo systemctl daemon-reload"
++  fi
++}
++
++cmd_setup_quickstart() {
++  echoinfo "Setting up SOLEN quickstart"
++  mkdir -p "${HOME}/.local/share/solen" "${HOME}/.config/systemd/user" || true
++  # Policy
++  local policy_src="${ROOT_DIR}/config/solen-policy.example.yaml"
++  local policy_dst="${HOME}/.serverutils/policy.yaml"
++  mkdir -p "${HOME}/.serverutils"
++  if [[ -f "$policy_dst" ]]; then
++    echowarn "Policy exists: $policy_dst"
++  else
++    cp "$policy_src" "$policy_dst" && echook "Installed policy: $policy_dst"
++  fi
++  # Install units (user)
++  cmd_install_units --user
++  echoinfo "Optionally enable timers:"
++  echo "  systemctl --user daemon-reload"
++  echo "  systemctl --user enable --now solen-health.timer"
++  echo "  systemctl --user enable --now solen-backups@etc.timer"
++}
++
+ cmd_doctor() {
+   local missing=0
+   local deps=(bash find awk sed grep)
+@@ -618,6 +740,10 @@ Usage:
+     #          --alias <bin> (install additional alias)
+   serverutils install-scripts [--user|--global] [--prefix su-] [--force]
+   serverutils uninstall-scripts [--user|--global] [--prefix su-]
++  serverutils install-units [--user|--global] [--force]
++  serverutils setup                 # quickstart policy + units install
++  serverutils setup-motd            # print shell config snippet to enable auto-MOTD
++  serverutils setup-motd-system     # print system-wide SSH MOTD snippets (update-motd/profile.d)
+   serverutils meta <category/name|name|path> [--json]
+   serverutils banner
+   serverutils validate [--subset PATTERN[,PATTERN..]] [--strict] [--no-policy]
+@@ -662,6 +788,43 @@ Top-level commands (TL;DR):
+ EOF
+ }
+ 
++cmd_setup_motd() {
++  echoinfo "Enable SOLEN MOTD in interactive shells (no edits performed)"
++  echo
++  echo "Bash — add to ~/.bashrc:"
++  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
++  echo
++  echo "Zsh — add to ~/.zshrc:"
++  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
++  echo
++  echo "Fish — add to ~/.config/fish/config.fish:"
++  echo "  if status is-interactive"
++  echo "      serverutils run motd/solen-motd -- --plain"
++  echo "  end"
++  echo
++  echoinfo "System-wide (admin): create /etc/profile.d/solen-motd.sh with the bash/zsh line"
++  echoinfo "Docs: docs/MOTD.md (performance, SSH, timers)"
++}
++
++cmd_setup_motd_system() {
++  echoinfo "System-wide SSH MOTD (no edits performed)"
++  echo
++  echo "Debian/Ubuntu — /etc/update-motd.d/90-solen (executable):"
++  cat <<'E'
++#!/bin/sh
++[ -x /usr/local/bin/serverutils ] || exit 0
++[ -t 1 ] || exit 0
++serverutils run motd/solen-motd -- --plain
++E
++  echo
++  echo "Then: chmod +x /etc/update-motd.d/90-solen"
++  echo
++  echo "Red Hat/Fedora (or no update-motd) — /etc/profile.d/solen-motd.sh:"
++  echo '  [ "$PS1" ] && [ -x /usr/local/bin/serverutils ] && serverutils run motd/solen-motd -- --plain'
++  echo
++  echoinfo "Remove the file(s) to disable. Docs: docs/MOTD.md"
++}
++
+ main() {
+   local cmd="${1:-home}"; shift || true
+   case "$cmd" in
+@@ -780,8 +943,12 @@ main() {
+     install-runner) cmd_install_runner "$@" ;;
+     install-scripts) cmd_install_scripts "$@" ;;
+     uninstall-scripts) cmd_uninstall_scripts "$@" ;;
++    install-units) cmd_install_units "$@" ;;
++    setup) cmd_setup_quickstart "$@" ;;
++    setup-motd) cmd_setup_motd "$@" ;;
++    setup-motd-system) cmd_setup_motd_system "$@" ;;
+     doctor) cmd_doctor "$@" ;;
+-    version) echo "$VERSION" ;;
++    version) echo "$VERSION (schema $SCHEMA_VERSION)" ;;
+     help|-h|--help) show_help ;;
+     *) echoerr "Unknown command: $cmd"; echo; show_help; exit 2 ;;
+   esac

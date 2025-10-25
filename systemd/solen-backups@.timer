@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly SOLEN backup of profile %i
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+Unit=solen-backups@%i.service
+
+[Install]
+WantedBy=timers.target
