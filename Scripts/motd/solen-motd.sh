@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # SOLEN-META:
 # name: motd/solen-motd
+# Non-interactive fast path:
+# - suppress pretty output for CI/cron/TERM=dumb
+# - still allow explicit JSON output when requested
+if [[ -n "${SOLEN_NO_TUI:-}" || "${TERM:-}" == "dumb" || ! -t 1 ]]; then
+  if [[ "${1:-}" == "--json" ]]; then
+    :
+  else
+    exit 0
+  fi
+fi
 # summary: SOLEN system summary (fast MOTD) with --json and --plain
 # tags: motd,summary,inventory
 # verbs: info

@@ -23,6 +23,7 @@ Usage:
   $(basename "$0") run --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
   $(basename "$0") prune --profile <name> [--dest <path>] [--retention-days N] [--dry-run] [--json]
   $(basename "$0") verify --profile <name> [--dest <path>] [--json]
+  $(basename "$0") verify --all [--json]
 
 Environment:
   SOLEN_BACKUPS_CONFIG   Path to profiles YAML (default: config/solen-backups.yaml)
@@ -48,6 +49,7 @@ profile=""
 dest_override="${SOLEN_BACKUPS_DEST:-}"
 ret_days="${SOLEN_BACKUPS_RETENTION_DAYS:-}"
 repo_per_profile="${SOLEN_KOPIA_REPO_PER_PROFILE:-0}"
+all_profiles=0
 while [[ $# -gt 0 ]]; do
   if solen_parse_common_flag "$1"; then
     shift
@@ -65,6 +67,10 @@ while [[ $# -gt 0 ]]; do
     --retention-days)
       ret_days="${2:-}"
       shift 2
+      ;;
+    --all)
+      all_profiles=1
+      shift
       ;;
     -h | --help)
       usage
@@ -88,11 +94,9 @@ done
   usage
   exit 1
 }
-[[ -n "$profile" ]] || {
-  solen_err "missing --profile"
-  usage
-  exit 1
-}
+if [[ $all_profiles -eq 0 ]]; then
+  [[ -n "$profile" ]] || { solen_err "missing --profile"; usage; exit 1; }
+fi
 
 # Resolve config and dest
 ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
@@ -364,6 +368,48 @@ elif [[ "$cmd" == "prune" ]]; then
     exit 0
   fi
 elif [[ "$cmd" == "verify" ]]; then
+  if [[ $all_profiles -eq 1 ]]; then
+    # list profile names from YAML
+    mapfile -t PROFILES < <(awk '/^[[:space:]]*-[[:space:]]*name:/{print $3}' "$cfg_path" | sed 's/"//g' )
+    ok_total=0; src_total=0; actions=""
+    for p in "${PROFILES[@]}"; do
+      profile="$p"
+      # Recompute sources for each profile
+      SRC_PATHS=(); EXCLUDES_FOR=(); DEFAULT_EXCLUDES=()
+      while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        case "$line" in
+          DEFEXCL\ *) DEFAULT_EXCLUDES+=("${line#DEFEXCL }") ;;
+          SRC\ *) SRC_PATHS+=("${line#SRC }") ;;
+          EXCL\ *) rest="${line#EXCL }"; pth="${rest%% *}"; pat="${rest#* }"; EXCLUDES_FOR["$pth"]+="|$pat" ;;
+        esac
+      done < <(parse_profile_yaml)
+      # Verify each source
+      if command -v kopia >/dev/null 2>&1; then
+        SUDO=""; if [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]]; then SUDO="sudo -E"; fi
+        if [[ "$repo_kind" == filesystem ]]; then
+          $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect filesystem --path "$repo_path" >/dev/null 2>&1 || true
+        else
+          region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"; endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
+          env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect s3 --bucket "${SOLEN_KOPIA_S3_BUCKET}" --prefix "${SOLEN_KOPIA_S3_PREFIX:-solen}${repo_per_profile:+/${profile}}" --region "$region"${endpoint_opt} >/dev/null 2>&1 || true
+        fi
+      fi
+      prof_ok=0
+      for src in "${SRC_PATHS[@]}"; do
+        src_total=$((src_total+1))
+        latest=$(env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" --json 2>/dev/null | jq -r '.[0].startTime' 2>/dev/null || true)
+        if [[ -n "$latest" && "$latest" != "null" ]]; then prof_ok=$((prof_ok+1)); actions+=$"OK  [$profile] $src -> $latest\n"; else actions+=$"MISS [$profile] $src\n"; fi
+      done
+      ok_total=$((ok_total+prof_ok))
+    done
+    summary="verify ${ok_total}/${src_total} sources have snapshots across profiles"
+    if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+      solen_json_record ok "$summary" "$actions" "\"metrics\":{\"sources\":${src_total},\"ok\":${ok_total}}"
+    else
+      printf '%s\n' "$actions"; solen_ok "$summary"
+    fi
+    exit 0
+  fi
   # Best-effort verification: list snapshots for each source and report latest timestamp
   if [[ $SOLEN_FLAG_JSON -ne 1 ]]; then
     solen_info "verifying snapshots for ${#SRC_PATHS[@]} source(s)"
