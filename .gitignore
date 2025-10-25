@@ -93,3 +93,7 @@ Thumbs.db
 
 # ServerUtils runner state
 .serverutils/
+
+
+dont commit diff files
+*.diff

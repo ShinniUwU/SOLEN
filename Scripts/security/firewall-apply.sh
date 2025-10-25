@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+
+# SOLEN-META:
+# name: security/firewall-apply
+# summary: Apply safe firewall defaults (ufw preferred) and open SSH + specified ports
+# requires: ufw,nft,iptables,sudo
+# tags: security,firewall,harden
+# verbs: apply,ensure
+# since: 0.2.0
+# breaking: false
+# outputs: status, summary, actions
+# root: false (uses sudo)
+
+set -euo pipefail
+
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${THIS_DIR}/../lib/solen.sh"
+solen_init_flags
+
+usage() {
+  cat << EOF
+Usage: $(basename "$0") [--ssh-port N] [--allow <spec>]... [--service <name>]... [--mode auto|ufw|nftables|iptables] [--dry-run] [--json] [--yes]
+
+Configures a basic inbound-deny firewall with explicit allows.
+
+Options:
+  --ssh-port N            SSH port to allow (default: 22)
+  --allow SPEC            Additional allow rule(s). Repeats allowed.
+                          SPEC forms:
+                            - 8080             (tcp implied)
+                            - tcp:80           (protocol:port)
+                            - udp:51820        (protocol:port)
+  --service NAME          Allow a named service profile (repeats allowed):
+                           - web        (tcp:80, tcp:443)
+                           - dns        (tcp:53, udp:53)
+                           - wireguard  (udp:51820)
+                           - http       (tcp:80)
+                           - https      (tcp:443)
+  --mode M                auto|ufw|nftables|iptables (default: auto; ufw preferred)
+
+Safety:
+  - Dry-run by default if --yes not provided.
+  - Requires policy token: firewall-apply
+  - Uses sudo for privileged commands.
+EOF
+}
+
+ssh_port=22
+mode="auto"
+declare -a allows=()
+declare -a services=()
+
+while [[ $# -gt 0 ]]; do
+  if solen_parse_common_flag "$1"; then shift; continue; fi
+  case "$1" in
+    --ssh-port) ssh_port="${2:-}"; shift 2 ;;
+    --allow) allows+=("${2:-}"); shift 2 ;;
+    --mode) mode="${2:-auto}"; shift 2 ;;
+    --service) services+=("${2:-}"); shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    *) break ;;
+  esac
+done
+
+if ! solen_policy_allows_token "firewall-apply"; then
+  msg="policy refused: firewall-apply"
+  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
+  exit 4
+fi
+
+# Normalize allow specs into proto and port
+norm_allows=()
+# Expand service names to rules
+service_rules_for() {
+  case "$1" in
+    web) echo "tcp:80 tcp:443" ;;
+    http) echo "tcp:80" ;;
+    https) echo "tcp:443" ;;
+    dns) echo "tcp:53 udp:53" ;;
+    wireguard|wg) echo "udp:51820" ;;
+    *) echo "" ;;
+  esac
+}
+for s in "${services[@]:-}"; do
+  for rule in $(service_rules_for "$s"); do
+    allows+=("$rule")
+  done
+done
+for spec in "${allows[@]:-}"; do
+  if [[ "$spec" =~ ^([0-9]+)$ ]]; then
+    norm_allows+=("tcp:$spec")
+  elif [[ "$spec" =~ ^(tcp|udp):([0-9]+)$ ]]; then
+    norm_allows+=("$spec")
+  else
+    solen_err "invalid --allow spec: $spec (expected PORT or proto:PORT)"
+    exit 1
+  fi
+done
+
+pick_mode() {
+  case "$mode" in
+    ufw|nftables|iptables) echo "$mode" ; return ;;
+    auto)
+      if command -v ufw >/dev/null 2>&1; then echo ufw; return; fi
+      if command -v nft >/dev/null 2>&1; then echo nftables; return; fi
+      if command -v iptables >/dev/null 2>&1; then echo iptables; return; fi
+      echo none; return ;;
+    *) echo none; return ;;
+  esac
+}
+
+chosen="$(pick_mode)"
+if [[ "$chosen" == "none" ]]; then
+  solen_err "no supported firewall tool available (install ufw or nftables)"
+  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "no firewall tool available" "" "\"code\":2"
+  exit 2
+fi
+
+actions=""
+if [[ "$chosen" == "ufw" ]]; then
+  actions+=$'sudo ufw default deny incoming\n'
+  actions+=$'sudo ufw default allow outgoing\n'
+  actions+=$"sudo ufw allow ${ssh_port}/tcp\n"
+  for a in "${norm_allows[@]:-}"; do
+    proto="${a%%:*}"; port="${a##*:}"
+    actions+=$"sudo ufw allow ${port}/${proto}\n"
+  done
+  actions+=$'sudo ufw --force enable\n'
+elif [[ "$chosen" == "nftables" ]]; then
+  # Ephemeral rules (idempotent-ish). Safer than overwriting system config.
+  actions+=$'sudo nft list tables || true\n'
+  actions+=$'sudo nft create table inet filter 2>/dev/null || true\n'
+  actions+=$'sudo nft list chain inet filter input >/dev/null 2>&1 || sudo nft add chain inet filter input { type filter hook input priority 0; policy drop; }\n'
+  actions+=$'sudo nft add rule inet filter input ct state established,related accept 2>/dev/null || true\n'
+  actions+=$'sudo nft add rule inet filter input iif lo accept 2>/dev/null || true\n'
+  actions+=$"sudo nft add rule inet filter input tcp dport ${ssh_port} accept 2>/dev/null || true\n"
+  for a in "${norm_allows[@]:-}"; do
+    proto="${a%%:*}"; port="${a##*:}"
+    actions+=$"sudo nft add rule inet filter input ${proto} dport ${port} accept 2>/dev/null || true\n"
+  done
+elif [[ "$chosen" == "iptables" ]]; then
+  # Conservative: add explicit accepts first, do not change default policies unless --yes and explicit.
+  actions+=$'sudo iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
+  actions+=$'sudo iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -i lo -j ACCEPT\n'
+  actions+=$"sudo iptables -C INPUT -p tcp --dport ${ssh_port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p tcp --dport ${ssh_port} -j ACCEPT\n"
+  for a in "${norm_allows[@]:-}"; do
+    proto="${a%%:*}"; port="${a##*:}"
+    actions+=$"sudo iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p ${proto} --dport ${port} -j ACCEPT\n"
+  done
+  actions+=$'# NOTE: default policy changes are intentionally omitted here to avoid lockouts.\n'
+fi
+
+summary="firewall apply via ${chosen}; ssh ${ssh_port}; allows=${#norm_allows[@]}"
+
+if [[ $SOLEN_FLAG_DRYRUN -eq 1 || $SOLEN_FLAG_YES -eq 0 ]]; then
+  [[ $SOLEN_FLAG_JSON -eq 1 ]] && {
+    solen_json_record ok "dry-run: $summary" "$actions" "\"would_change\":1"
+    exit 0
+  }
+  solen_info "dry-run enforced (use --yes to apply)"
+  printf '%s' "$actions"
+  exit 0
+fi
+
+# Apply
+changed=0
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  solen_info "$line"
+  set +e
+  eval "$line"
+  rc=$?
+  set -e
+  if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
+done <<< "$actions"
+
+if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+  solen_json_record ok "$summary" "$actions" "\"changed\":${changed}"
+else
+  solen_ok "$summary (changed=${changed})"
+fi
+exit 0

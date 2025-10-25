@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly SOLEN Kopia maintenance
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+Persistent=true
+Unit=solen-kopia-maintenance.service
+
+[Install]
+WantedBy=timers.target
+

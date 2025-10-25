@@ -1,0 +1,13 @@
+[
+Unit]
+Description=SOLEN Kopia maintenance (quick)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Downloads/ServerUtils
+Environment=SOLEN_PLAIN=1
+ExecStart=./serverutils run backups/maintenance -- --quick --json
+ExecStartPre=/usr/bin/env mkdir -p %h/.local/share/solen
+StandardOutput=append:%h/.local/share/solen/kopia-maintenance.ndjson
+StandardError=journal
+

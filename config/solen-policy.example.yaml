@@ -17,6 +17,8 @@ allow:
     - external-ping
     - backup-path:/var/backups/solen
     - backup-profile:etc
+    - firewall-apply
+    - ssh-config-apply
     - package-upgrade
 
 deny:
