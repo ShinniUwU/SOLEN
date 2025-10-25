@@ -8,14 +8,33 @@ pass=0
 fail=0
 skip=0
 
+collect_json_objects() {
+  local buf=""
+  while IFS= read -r line; do
+    # ignore non-JSON preface
+    if [[ -z "$buf" && ! "$line" =~ ^\{ ]]; then
+      continue
+    fi
+    if [[ -z "$buf" ]]; then
+      buf="$line"
+    else
+      buf+=$'\n'"$line"
+    fi
+    if echo "$buf" | jq -e . >/dev/null 2>&1; then
+      echo "$buf"
+      buf=""
+    fi
+  done
+}
+
 check_cmd() {
   local key="$1"; local expected_op="$2"
   set +e
   out=$(SOLEN_NO_TUI=1 SOLEN_PLAIN=1 TERM=dumb ./serverutils run "$key" -- --json 2>/dev/null)
   rc=$?
   set -e
-  # Filter JSON lines only
-  json_lines=$(printf '%s\n' "$out" | grep -E '^{"')
+  # Extract full JSON objects and minify to single lines
+  json_lines=$(printf '%s\n' "$out" | collect_json_objects | jq -c .)
   if [[ "$key" == docker/* ]]; then
     # docker may be unavailable; accept rc=2 as skip
     if [[ $rc -eq 2 ]]; then

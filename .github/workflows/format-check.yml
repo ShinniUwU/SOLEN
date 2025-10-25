@@ -21,9 +21,9 @@ jobs:
       - name: Run shfmt Format Check 🧐
         run: |
           echo " "
-          echo "🎨 Running 'shfmt -d' to check formatting on all .sh files..."
+          echo "🎨 Running 'shfmt -i 2 -ci -sr -d' on ./Scripts ..."
           echo "-------------------------------------------------------------"
           docker pull mvdan/shfmt:latest-alpine
-          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:latest-alpine -d ./Scripts
+          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:latest-alpine -i 2 -ci -sr -d ./Scripts
           echo "-------------------------------------------------------------"
           echo "✅ Formatting check complete! (Will fail if diffs were found)"
