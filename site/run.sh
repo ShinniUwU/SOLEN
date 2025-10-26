@@ -36,6 +36,21 @@ for a in "${INSTALL_ARGS[@]}"; do
   case "$a" in --global) SCOPE="global" ;; --user) SCOPE="user" ;; esac
 done
 
+# Default to enabling MOTD unless explicitly provided
+has_with_motd=0
+for a in "${INSTALL_ARGS[@]}"; do
+  if [[ "$a" == "--with-motd" ]]; then has_with_motd=1; break; fi
+done
+if [[ $has_with_motd -eq 0 ]]; then
+  INSTALL_ARGS+=("--with-motd")
+fi
+
+# Track whether --yes was supplied (for optional prompt)
+HAS_YES=0
+for a in "${INSTALL_ARGS[@]}"; do
+  [[ "$a" == "--yes" ]] && HAS_YES=1
+done
+
 need(){ command -v "$1" >/dev/null 2>&1 || { echo "missing: $1" >&2; exit 2; }; }
 need tar; command -v curl >/dev/null || command -v wget >/dev/null || { echo "need curl or wget" >&2; exit 2; }
 command -v sha256sum >/dev/null || command -v shasum >/dev/null || { echo "need sha256sum or shasum" >&2; exit 2; }
@@ -83,4 +98,13 @@ echo "==> Running installer (dry-run unless --yes provided)"
 # If interactive and not disabled, launch TUI from the persistent root
 if [[ $SHOW_TUI -eq 1 && -t 1 && "${SOLEN_NO_TUI:-0}" != "1" ]]; then
   ( cd "$PERSIST_DIR" && ./serverutils tui )
+fi
+
+# If interactive and user didn't pass --yes, offer to apply now
+if [[ $HAS_YES -eq 0 && -t 0 && -t 1 ]]; then
+  read -r -p "Apply installer changes now? [y/N]: " __ans || true
+  if [[ "${__ans}" =~ ^[Yy]$ ]]; then
+    echo "==> Applying installer changes (--yes)"
+    ( cd "$PERSIST_DIR" && ./serverutils install "${INSTALL_ARGS[@]}" --yes )
+  fi
 fi

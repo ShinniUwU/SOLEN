@@ -59,9 +59,11 @@ timestamp() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 ensure_audit() {
   mkdir -p "${AUDIT_DIR}" || true
   touch "${AUDIT_LOG}" || true
-  if [[ -z "${_SOLEN_AUDIT_ANNOUNCED:-}" ]]; then
-    echoinfo "audit log: ${AUDIT_LOG}"
-    _SOLEN_AUDIT_ANNOUNCED=1
+  if [[ "${SOLEN_RUN_QUIET:-0}" != "1" ]]; then
+    if [[ -z "${_SOLEN_AUDIT_ANNOUNCED:-}" ]]; then
+      echoinfo "audit log: ${AUDIT_LOG}"
+      _SOLEN_AUDIT_ANNOUNCED=1
+    fi
   fi
 }
 
@@ -443,7 +445,9 @@ cmd_run() {
   audit_log "RUN key=${key} path=${resolved} args=$(printf '%q ' "${script_args[@]}" ) user=${USER:-unknown}"
 
   if [[ $dry_run -eq 1 ]]; then
-    echoinfo "[dry-run] Would execute: $resolved ${script_args[*]:-}"
+    if [[ "${SOLEN_RUN_QUIET:-0}" != "1" ]]; then
+      echoinfo "[dry-run] Would execute: $resolved ${script_args[*]:-}"
+    fi
     if [[ $json -eq 1 ]]; then
       # Keep JSON simple to avoid complex quoting; args are a single concatenated string
       local args_concat
@@ -457,15 +461,19 @@ cmd_run() {
     return 0
   fi
 
-  echoinfo "Executing ${key}..."
+  if [[ "${SOLEN_RUN_QUIET:-0}" != "1" ]]; then
+    echoinfo "Executing ${key}..."
+  fi
   set +e
   "${resolved}" "${script_args[@]}"
   local rc=$?
   set -e
-  if [[ $rc -eq 0 ]]; then
-    echook "Completed (${key})"
-  else
-    echoerr "Script failed with exit code ${rc} (${key})"
+  if [[ "${SOLEN_RUN_QUIET:-0}" != "1" ]]; then
+    if [[ $rc -eq 0 ]]; then
+      echook "Completed (${key})"
+    else
+      echoerr "Script failed with exit code ${rc} (${key})"
+    fi
   fi
   if [[ $json -eq 1 ]]; then
     printf '{"status":"%s","exit_code":%d,"key":"%s","path":"%s"}\n' \
