@@ -33,11 +33,21 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup Pages
         uses: actions/configure-pages@v5
+      - name: Prepare release tarball
+        run: |
+          set -euxo pipefail
+          mkdir -p site/releases
+          # Build a lean tarball with runner + scripts and assets
+          tar -czf site/releases/solen-latest.tar.gz \
+            serverutils Scripts asset systemd config asciiart.ascii || true
+          if [ -f site/releases/solen-latest.tar.gz ]; then
+            (cd site/releases && sha256sum solen-latest.tar.gz > solen-latest.tar.gz.sha256)
+          fi
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          # Upload only the static site contents
+          path: 'site'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
