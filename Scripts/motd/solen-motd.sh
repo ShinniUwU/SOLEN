@@ -43,7 +43,9 @@ done
 
 # non-interactive suppression (pretty output)
 NONINT=0
-if [ "${SOLEN_NO_TUI:-0}" = "1" ] || [ "${TERM:-}" = "dumb" ] || ! [ -t 1 ] || ! [[ $- == *i* ]]; then
+# Consider non-interactive only when there's no TTY or TERM is dumb, or explicitly disabled.
+# Do NOT rely on $- (scripts run in non-interactive shells but still print to TTY for MOTD).
+if [ "${SOLEN_NO_TUI:-0}" = "1" ] || [ "${TERM:-}" = "dumb" ] || ! [ -t 1 ]; then
   NONINT=1
 fi
 
@@ -83,11 +85,16 @@ center() {
 }
 
 read_banner() {
+  # Try CWD, then repo root alongside serverutils
   if [ -f "asciiart.ascii" ]; then
     cat asciiart.ascii | trim80
-  elif [ -f "./asciiart.ascii" ]; then
-    cat ./asciiart.ascii | trim80
-  else return 0; fi
+    return 0
+  fi
+  local root
+  root="$(cd "${THIS_DIR}/../.." 2>/dev/null && pwd)"
+  if [ -n "$root" ] && [ -f "$root/asciiart.ascii" ]; then
+    cat "$root/asciiart.ascii" | trim80
+  fi
 }
 
 # --- data collectors (fast) ---
