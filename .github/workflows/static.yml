@@ -37,21 +37,17 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p site/releases
-          # Sanity-check required files exist before packaging
+          # Always required
           test -f serverutils
           test -f Scripts/install/install.sh
           test -f Scripts/motd/solen-motd.sh
-          # optional libs used by installer and helpers
-          test -f Scripts/lib/solen.sh
-          test -f Scripts/lib/edit.sh
-          test -f Scripts/lib/pm.sh
+          # Warn (but do not fail) if optional libs missing; installer has fallbacks
+          if [ ! -f Scripts/lib/solen.sh ]; then echo "WARN: Scripts/lib/solen.sh missing"; fi
+          if [ ! -f Scripts/lib/edit.sh ]; then echo "WARN: Scripts/lib/edit.sh missing"; fi
+          if [ ! -f Scripts/lib/pm.sh ]; then echo "WARN: Scripts/lib/pm.sh missing"; fi
           # Build a lean tarball with runner + scripts and assets
           tar -czf site/releases/solen-latest.tar.gz \
             serverutils Scripts asset systemd config asciiart.ascii
-          # Verify tarball contains required libs
-          tar -tf site/releases/solen-latest.tar.gz | grep -q '^Scripts/lib/solen.sh$'
-          tar -tf site/releases/solen-latest.tar.gz | grep -q '^Scripts/lib/edit.sh$'
-          tar -tf site/releases/solen-latest.tar.gz | grep -q '^Scripts/lib/pm.sh$'
           (cd site/releases && sha256sum solen-latest.tar.gz > solen-latest.tar.gz.sha256)
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

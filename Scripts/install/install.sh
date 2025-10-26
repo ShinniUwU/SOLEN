@@ -14,9 +14,52 @@
 set -Eeuo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "${THIS_DIR}/../lib/solen.sh"
-. "${THIS_DIR}/../lib/edit.sh"
-. "${THIS_DIR}/../lib/pm.sh"
+# Try to source shared libs if available; otherwise provide minimal fallbacks
+if [ -f "${THIS_DIR}/../lib/solen.sh" ]; then . "${THIS_DIR}/../lib/solen.sh"; fi
+if [ -f "${THIS_DIR}/../lib/edit.sh" ]; then . "${THIS_DIR}/../lib/edit.sh"; fi
+if [ -f "${THIS_DIR}/../lib/pm.sh" ]; then . "${THIS_DIR}/../lib/pm.sh"; fi
+
+# Fallbacks (only if not already defined by libs)
+type solen_info >/dev/null 2>&1 || solen_info() { echo -e "\033[0;36mℹ️  $*\033[0m"; }
+type solen_ok   >/dev/null 2>&1 || solen_ok()   { echo -e "\033[0;32m✅ $*\033[0m"; }
+type solen_warn >/dev/null 2>&1 || solen_warn() { echo -e "\033[0;33m⚠️  $*\033[0m"; }
+type solen_err  >/dev/null 2>&1 || solen_err()  { echo -e "\033[0;31m❌ $*\033[0m" 1>&2; }
+
+type solen_init_flags >/dev/null 2>&1 || solen_init_flags() {
+  : "${SOLEN_FLAG_YES:=0}"; : "${SOLEN_FLAG_JSON:=0}"; : "${SOLEN_FLAG_DRYRUN:=1}";
+  [ "$SOLEN_FLAG_YES" = 1 ] && SOLEN_FLAG_DRYRUN=0 || true
+}
+type solen_parse_common_flag >/dev/null 2>&1 || solen_parse_common_flag() {
+  case "$1" in --yes|-y) SOLEN_FLAG_YES=1; SOLEN_FLAG_DRYRUN=0; return 0;; --dry-run) SOLEN_FLAG_DRYRUN=1; return 0;; --json) SOLEN_FLAG_JSON=1; return 0;; esac; return 1;
+}
+type solen_json_record >/dev/null 2>&1 || solen_json_record() {
+  local status="$1" summary="$2" actions_text="${3:-}" extra="${4:-}" host; host=$(hostname 2>/dev/null || uname -n)
+  _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  local actions_json="[]"; if [ -n "$actions_text" ]; then actions_json="["; local first=1; while IFS= read -r l; do [ -z "$l" ] && continue; local e; e="$(_esc "$l")"; [ $first -eq 0 ] && actions_json+=" ," || first=0; actions_json+="\"$e\""; done <<EOF
+${actions_text}
+EOF
+  actions_json+="]"; fi
+  printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","actions":%s%s}\n' \
+    "$(_esc "$status")" "$(_esc "$summary")" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$(_esc "$host")" "$actions_json" "${extra:+,${extra}}"
+}
+
+type solen_insert_marker_block >/dev/null 2>&1 || solen_insert_marker_block() {
+  local file="$1" begin="$2" end="$3" content="$4" tmp
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true; touch "$file"
+  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{in=0} index($0,b)==1{in=1;next} index($0,e)==1{in=0;next} !in{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
+  tail -c1 "$file" >/dev/null 2>&1 || echo >> "$file"
+  { echo "$begin"; printf "%s\n" "$content"; echo "$end"; } >> "$file"
+}
+type solen_remove_marker_block >/dev/null 2>&1 || solen_remove_marker_block() {
+  local file="$1" begin="$2" end="$3" tmp; [ -f "$file" ] || return 0
+  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{in=0} index($0,b)==1{in=1;next} index($0,e)==1{in=0;next} !in{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
+type pm_detect >/dev/null 2>&1 || pm_detect() { if command -v apt-get >/dev/null; then __SOLEN_PM=apt; elif command -v dnf >/dev/null; then __SOLEN_PM=dnf; elif command -v pacman >/dev/null; then __SOLEN_PM=pacman; elif command -v zypper >/dev/null; then __SOLEN_PM=zypper; else __SOLEN_PM=unknown; fi; }
+type pm_name   >/dev/null 2>&1 || pm_name()   { echo "${__SOLEN_PM:-unknown}"; }
+type pm_update_plan >/dev/null 2>&1 || pm_update_plan() { case "${__SOLEN_PM:-unknown}" in apt) echo "sudo apt-get update -y";; dnf) echo "sudo dnf -y makecache";; pacman) echo "sudo pacman -Sy --noconfirm";; zypper) echo "sudo zypper -n refresh";; *) echo "# pm update (unsupported)";; esac; }
+type pm_install_plan >/dev/null 2>&1 || pm_install_plan() { case "${__SOLEN_PM:-unknown}" in apt) echo "sudo apt-get install -y $*";; dnf) echo "sudo dnf -y install $*";; pacman) echo "sudo pacman -S --noconfirm $*";; zypper) echo "sudo zypper -n install $*";; *) echo "# pm install $* (unsupported)";; esac; }
+
 solen_init_flags
 
 usage() {
