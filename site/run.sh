@@ -10,7 +10,7 @@ RELEASE="${SOLEN_RELEASE:-latest}"
 TARBALL_URL="${BASE_URL}/releases/solen-${RELEASE}.tar.gz"
 CHECKSUM_URL="${TARBALL_URL}.sha256"
 
-NO_VERIFY=0; SRC_URL=""; KEEP=0
+NO_VERIFY=0; SRC_URL=""; KEEP=0; SHOW_TUI=1
 
 # parse bootstrap flags (unknowns are forwarded to installer)
 BOOT_ARGS=()
@@ -20,6 +20,8 @@ while [[ $# -gt 0 ]]; do
     --source) SRC_URL="$2"; shift 2;;
     --no-verify) NO_VERIFY=1; shift;;
     --keep) KEEP=1; shift;;
+    --no-tui) SHOW_TUI=0; shift;;
+    --tui) SHOW_TUI=1; shift;;
     -h|--help)
       echo "usage: bash <(curl -sL ${BASE_URL}/run.sh) [--release vX.Y.Z|latest] [--source URL] [--no-verify] [--keep] -- [installer flags]"; exit 0;;
     --) shift; break;;
@@ -77,3 +79,8 @@ fi
 
 echo "==> Running installer (dry-run unless --yes provided)"
 ( cd "$PERSIST_DIR" && ./serverutils install "${INSTALL_ARGS[@]}" )
+
+# If interactive and not disabled, launch TUI from the persistent root
+if [[ $SHOW_TUI -eq 1 && -t 1 && "${SOLEN_NO_TUI:-0}" != "1" ]]; then
+  ( cd "$PERSIST_DIR" && ./serverutils tui )
+fi

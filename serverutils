@@ -73,7 +73,44 @@ audit_log() {
 
 die() { echoerr "$*"; exit 1; }
 
+find_alternate_root() {
+  # Search common persistent roots for a valid copy
+  local cands=()
+  cands+=("${SOLEN_ROOT_HINT:-}")
+  cands+=("${HOME}/.local/share/solen/latest")
+  cands+=("${HOME}/.local/share/solen")
+  cands+=("/usr/local/share/solen/latest")
+  cands+=("/usr/local/share/solen")
+  local c
+  for c in "${cands[@]}"; do
+    [[ -z "$c" ]] && continue
+    if [[ -x "$c/serverutils" && -d "$c/Scripts" ]]; then
+      echo "$c"
+      return 0
+    fi
+    # one level down
+    if [[ -d "$c" ]]; then
+      local sub
+      while IFS= read -r sub; do
+        if [[ -x "$sub/serverutils" && -d "$sub/Scripts" ]]; then
+          echo "$sub"; return 0
+        fi
+      done < <(find "$c" -maxdepth 2 -type f -name serverutils -printf '%h\n' 2>/dev/null || true)
+    fi
+  done
+  return 1
+}
+
 require_scripts_dir() {
+  if [[ ! -d "${SCRIPTS_DIR}" ]]; then
+    # Try to locate a valid repo root and rebase
+    local alt
+    alt="$(find_alternate_root || true)"
+    if [[ -n "$alt" ]]; then
+      ROOT_DIR="$alt"
+      SCRIPTS_DIR="${ROOT_DIR}/Scripts"
+    fi
+  fi
   [[ -d "${SCRIPTS_DIR}" ]] || die "Scripts directory not found at ${SCRIPTS_DIR}"
 }
 
