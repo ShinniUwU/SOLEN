@@ -149,26 +149,29 @@ path_check_msg() {
 }
 
 install_motd_hooks_user() {
-  local shshell
-  shshell="${SHELL##*/}"
-  case "$shshell" in
-    bash)
-      solen_insert_marker_block "$HOME/.bashrc" "# >>> SOLEN MOTD_BASH (do not edit) >>>" "# <<< SOLEN MOTD_BASH (managed) <<<" "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_bash.sh")"
-      if [[ -f "$HOME/.bash_profile" ]] && ! grep -Fq ">>> SOLEN BASH_PROFILE_INCLUDE" "$HOME/.bash_profile"; then
-        solen_insert_marker_block "$HOME/.bash_profile" "# >>> SOLEN BASH_PROFILE_INCLUDE (do not edit) >>>" "# <<< SOLEN BASH_PROFILE_INCLUDE (managed) <<<" "$(cat "${THIS_DIR}/../../asset/shell/hooks/bash_profile_include.sh")"
-      fi
-      ;;
-    zsh)
-      solen_insert_marker_block "$HOME/.zshrc" "# >>> SOLEN MOTD_ZSH (do not edit) >>>" "# <<< SOLEN MOTD_ZSH (managed) <<<" "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_zsh.sh")"
-      ;;
-    fish)
-      mkdir -p "$HOME/.config/fish"
-      solen_insert_marker_block "$HOME/.config/fish/config.fish" "# >>> SOLEN MOTD_FISH (do not edit) >>>" "# <<< SOLEN MOTD_FISH (managed) <<<" "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_fish.fish")"
-      ;;
-    *)
-      solen_insert_marker_block "$HOME/.bashrc" "# >>> SOLEN MOTD_BASH (do not edit) >>>" "# <<< SOLEN MOTD_BASH (managed) <<<" "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_bash.sh")"
-      ;;
-  esac
+  # Install guarded blocks for common shells regardless of current $SHELL
+  # Bash
+  solen_insert_marker_block "$HOME/.bashrc" \
+    "# >>> SOLEN MOTD_BASH (do not edit) >>>" \
+    "# <<< SOLEN MOTD_BASH (managed) <<<" \
+    "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_bash.sh")"
+  if [[ -f "$HOME/.bash_profile" ]] && ! grep -Fq ">>> SOLEN BASH_PROFILE_INCLUDE" "$HOME/.bash_profile"; then
+    solen_insert_marker_block "$HOME/.bash_profile" \
+      "# >>> SOLEN BASH_PROFILE_INCLUDE (do not edit) >>>" \
+      "# <<< SOLEN BASH_PROFILE_INCLUDE (managed) <<<" \
+      "$(cat "${THIS_DIR}/../../asset/shell/hooks/bash_profile_include.sh")"
+  fi
+  # Zsh
+  solen_insert_marker_block "$HOME/.zshrc" \
+    "# >>> SOLEN MOTD_ZSH (do not edit) >>>" \
+    "# <<< SOLEN MOTD_ZSH (managed) <<<" \
+    "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_zsh.sh")"
+  # Fish
+  mkdir -p "$HOME/.config/fish"
+  solen_insert_marker_block "$HOME/.config/fish/config.fish" \
+    "# >>> SOLEN MOTD_FISH (do not edit) >>>" \
+    "# <<< SOLEN MOTD_FISH (managed) <<<" \
+    "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_fish.fish")"
 }
 
 install_motd_hooks_global() {
