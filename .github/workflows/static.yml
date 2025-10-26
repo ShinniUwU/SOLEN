@@ -37,12 +37,22 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p site/releases
+          # Sanity-check required files exist before packaging
+          test -f serverutils
+          test -f Scripts/install/install.sh
+          test -f Scripts/motd/solen-motd.sh
+          # optional libs used by installer and helpers
+          test -f Scripts/lib/solen.sh
+          test -f Scripts/lib/edit.sh
+          test -f Scripts/lib/pm.sh
           # Build a lean tarball with runner + scripts and assets
           tar -czf site/releases/solen-latest.tar.gz \
-            serverutils Scripts asset systemd config asciiart.ascii || true
-          if [ -f site/releases/solen-latest.tar.gz ]; then
-            (cd site/releases && sha256sum solen-latest.tar.gz > solen-latest.tar.gz.sha256)
-          fi
+            serverutils Scripts asset systemd config asciiart.ascii
+          # Verify tarball contains required libs
+          tar -tf site/releases/solen-latest.tar.gz | grep -q '^Scripts/lib/solen.sh$'
+          tar -tf site/releases/solen-latest.tar.gz | grep -q '^Scripts/lib/edit.sh$'
+          tar -tf site/releases/solen-latest.tar.gz | grep -q '^Scripts/lib/pm.sh$'
+          (cd site/releases && sha256sum solen-latest.tar.gz > solen-latest.tar.gz.sha256)
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
