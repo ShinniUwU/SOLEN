@@ -8,7 +8,14 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks for this script to find the real repo root
+_SRC="${BASH_SOURCE[0]}"
+while [ -h "$_SRC" ]; do
+  _DIR="$(cd -P "$(dirname "$_SRC")" && pwd)"
+  _LINK="$(readlink "$_SRC")"
+  if [[ "$_LINK" != /* ]]; then _SRC="${_DIR}/${_LINK}"; else _SRC="$_LINK"; fi
+done
+ROOT_DIR="$(cd -P "$(dirname "$_SRC")" && pwd)"
 SCRIPTS_DIR="${ROOT_DIR}/Scripts"
 # Audit path selection with env overrides
 SCHEMA_VERSION="1.0.0"
