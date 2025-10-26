@@ -162,16 +162,30 @@ _net() {
   fi
 }
 
+color_for_pct() {
+  # echo color code based on pct thresholds
+  local p="${1:-0}"
+  if awk -v x="$p" 'BEGIN{exit !(x<50)}'; then printf "%s" "$C_OK"; 
+  elif awk -v x="$p" 'BEGIN{exit !(x<80)}'; then printf "%s" "$C_WARN"; 
+  else printf "%s" "$C_ERR"; fi
+}
+
 bar() {
-  # bar PCT width (handles floats)
-  local pct="$1" width="${2:-20}"
+  # Fancy unicode bar with color (if not plain)
+  local pct="$1" width="${2:-22}"
   [ -z "$pct" ] && pct=0
-  # compute fill with awk to support floats
-  local fill=$(awk -v p="$pct" -v w="$width" "BEGIN{ if(p<0)p=0; if(p>100)p=100; printf \"%d\", int(p*w/100) }")
+  local fill=$(awk -v p="$pct" -v w="$width" "BEGIN{ if(p<0)p=0; if(p>100)p=100; printf \"%d\", int(p*w/100+0.5) }")
   [ "$fill" -gt "$width" ] && fill="$width"
+  local filled_char unf_char
+  if [ "$PLAIN" != "1" ]; then filled_char="█"; unf_char="░"; else filled_char="#"; unf_char="-"; fi
+  local i
+  local col
+  col=$(color_for_pct "$pct")
   printf "["
-  printf "%0.s#" $(seq 1 "$fill")
-  printf "%0.s-" $(seq $((fill + 1)) "$width")
+  if [ "$PLAIN" != "1" ]; then printf "%s" "$col"; fi
+  for i in $(seq 1 "$fill"); do printf "%s" "$filled_char"; done
+  if [ "$PLAIN" != "1" ]; then printf "%s" "$C_RESET"; fi
+  for i in $(seq $((fill + 1)) "$width"); do printf "%s" "$unf_char"; done
   printf "]"
 }
 
@@ -206,29 +220,52 @@ print_human() {
   w "${C_KEY}Host${C_RESET}: ${C_VAL}${host}${C_RESET}"
   w "${C_KEY}OS${C_RESET}:   ${C_VAL}${os}${C_RESET}  ${C_DIM}kernel${C_RESET} ${kernel}  ${C_DIM}uptime${C_RESET} ${up}"
 
-  # CPU line
+  # CPU line with colored loads
   local l15_per_core
   l15_per_core=$(awk -v l="$l15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.2f", l/c }')
-  w "${C_KEY}CPU${C_RESET}:  load ${C_VAL}${l1}${C_RESET}/${C_VAL}${l5}${C_RESET}/${C_VAL}${l15}${C_RESET}  cores ${C_VAL}${cores}${C_RESET}  15m/core ${C_VAL}${l15_per_core}${C_RESET}"
+  local c1 c5 c15
+  c1=$(color_for_pct $(awk -v l="$l1" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }'))
+  c5=$(color_for_pct $(awk -v l="$l5" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }'))
+  c15=$(color_for_pct $(awk -v l="$l15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }'))
+  printf "%sCPU%s:  load %s%s%s/%s%s%s/%s%s%s  cores %s%s%s  15m/core %s%s%s\n" \
+    "$C_KEY" "$C_RESET" \
+    "$c1" "$l1" "$C_RESET" \
+    "$c5" "$l5" "$C_RESET" \
+    "$c15" "$l15" "$C_RESET" \
+    "$C_VAL" "$cores" "$C_RESET" \
+    "$C_VAL" "$l15_per_core" "$C_RESET"
 
   # Memory line
   local used_g total_g avail_g
   used_g=$(to_gib "$used_m"); total_g=$(to_gib "$total_m"); avail_g=$(to_gib "$avail_m")
-  printf "%s %s %s %s %s\n" "${C_KEY}Mem${C_RESET}:" "${C_VAL}${used_g}G${C_RESET}/${C_VAL}${total_g}G${C_RESET} avail ${C_VAL}${avail_g}G${C_RESET}" "$(bar "$mem_pct" 20)" "${C_DIM}" "${mem_pct%%%}%${C_RESET}" | awk '{printf "%s %-28s %-22s %s%s\n", $1, $2, $3, $4, $5}'
+  printf "%s %s %s %s %s\n" "${C_KEY}Mem${C_RESET}:" "${C_VAL}${used_g}G${C_RESET}/${C_VAL}${total_g}G${C_RESET} avail ${C_VAL}${avail_g}G${C_RESET}" "$(bar "$mem_pct" 24)" "${C_DIM}" "${mem_pct%%%}%${C_RESET}" | awk '{printf "%s %-32s %-24s %s%s\n", $1, $2, $3, $4, $5}'
 
   # Swap line (if any)
   if [ "${swap_total_m:-0}" != "0" ]; then
     local swap_used_g swap_total_g
     swap_used_g=$(to_gib "$swap_used_m"); swap_total_g=$(to_gib "$swap_total_m")
-    printf "%s %s %s %s %s\n" "${C_KEY}Swap${C_RESET}:" "${C_VAL}${swap_used_g}G${C_RESET}/${C_VAL}${swap_total_g}G${C_RESET}" "$(bar "$swap_pct" 20)" "${C_DIM}" "${swap_pct%%%}%${C_RESET}" | awk '{printf "%s %-28s %-22s %s%s\n", $1, $2, $3, $4, $5}'
+    printf "%s %s %s %s %s\n" "${C_KEY}Swap${C_RESET}:" "${C_VAL}${swap_used_g}G${C_RESET}/${C_VAL}${swap_total_g}G${C_RESET}" "$(bar "$swap_pct" 24)" "${C_DIM}" "${swap_pct%%%}%${C_RESET}" | awk '{printf "%s %-32s %-24s %s%s\n", $1, $2, $3, $4, $5}'
   fi
 
-  # Disks
-  if [ "${droot_total_g:-0}" != "0" ]; then
-    printf "%s %s %s %s %s\n" "${C_KEY}Disk${C_RESET}:" "/    ${C_VAL}${droot_used_g}G${C_RESET}/${C_VAL}${droot_total_g}G${C_RESET}" "$(bar "$droot_pct" 20)" "${C_DIM}" "${droot_pct%%%}%${C_RESET}" | awk '{printf "%s %-28s %-22s %s%s\n", $1, $2, $3, $4, $5}'
+  # Disks (top mounts)
+  list_mounts() {
+    df -P -BG | awk 'NR>1 && $1!~/(tmpfs|overlay|devtmpfs)/{gsub("G","",$2); gsub("G","",$3); gsub("%","",$5); printf "%s %s %s %s\n", $6,$3,$2,$5 }'
+  }
+  local printed=0
+  while read -r mnt used total pct; do
+    [ -z "$mnt" ] && continue
+    printf "%s %s %s %s %s\n" "${C_KEY}Disk${C_RESET}:" "$(printf "%-5s %s%sG%s/%s%sG%s" "$mnt" "$C_VAL" "$used" "$C_RESET" "$C_VAL" "$total" "$C_RESET")" "$(bar "$pct" 24)" "${C_DIM}" "${pct%%%}%${C_RESET}" | awk '{printf "%s %-32s %-24s %s%s\n", $1, $2, $3, $4, $5}'
+    printed=$((printed+1))
+    [ $printed -ge 3 ] && break
+  done < <(list_mounts)
+
+  # Last login (best-effort)
+  last_line=""
+  if command -v last >/dev/null 2>&1; then
+    last_line=$(last -n 2 -R -w "$USER" 2>/dev/null | grep -v 'wtmp begins' | head -n1 | sed 's/  \+/ /g')
   fi
-  if [ "${dboot_total_g:-0}" != "0" ]; then
-    printf "%s %s %s %s %s\n" "${C_KEY}Disk${C_RESET}:" "/boot ${C_VAL}${dboot_used_g}G${C_RESET}/${C_VAL}${dboot_total_g}G${C_RESET}" "$(bar "$dboot_pct" 20)" "${C_DIM}" "${dboot_pct%%%}%${C_RESET}" | awk '{printf "%s %-28s %-22s %s%s\n", $1, $2, $3, $4, $5}'
+  if [ -n "$last_line" ]; then
+    w "${C_KEY}Last login${C_RESET}: ${C_VAL}${last_line}${C_RESET}"
   fi
 
   # Network

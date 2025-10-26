@@ -46,13 +46,13 @@ EOF
 type solen_insert_marker_block >/dev/null 2>&1 || solen_insert_marker_block() {
   local file="$1" begin="$2" end="$3" content="$4" tmp
   mkdir -p "$(dirname "$file")" 2>/dev/null || true; touch "$file"
-  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{in=0} index($0,b)==1{in=1;next} index($0,e)==1{in=0;next} !in{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
+  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{inblk=0} index($0,b)==1{inblk=1;next} index($0,e)==1{inblk=0;next} !inblk{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
   tail -c1 "$file" >/dev/null 2>&1 || echo >> "$file"
   { echo "$begin"; printf "%s\n" "$content"; echo "$end"; } >> "$file"
 }
 type solen_remove_marker_block >/dev/null 2>&1 || solen_remove_marker_block() {
   local file="$1" begin="$2" end="$3" tmp; [ -f "$file" ] || return 0
-  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{in=0} index($0,b)==1{in=1;next} index($0,e)==1{in=0;next} !in{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
+  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{inblk=0} index($0,b)==1{inblk=1;next} index($0,e)==1{inblk=0;next} !inblk{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
 type pm_detect >/dev/null 2>&1 || pm_detect() { if command -v apt-get >/dev/null; then __SOLEN_PM=apt; elif command -v dnf >/dev/null; then __SOLEN_PM=dnf; elif command -v pacman >/dev/null; then __SOLEN_PM=pacman; elif command -v zypper >/dev/null; then __SOLEN_PM=zypper; else __SOLEN_PM=unknown; fi; }

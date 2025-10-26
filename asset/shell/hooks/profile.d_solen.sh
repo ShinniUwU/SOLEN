@@ -5,6 +5,6 @@ if [ -n "$SOLEN_NO_TUI" ] || [ "$TERM" = "dumb" ]; then
   :
 else
   if command -v serverutils >/dev/null 2>&1; then
-    SOLEN_RUN_QUIET=1 serverutils run motd/solen-motd -- --plain
+    SOLEN_RUN_QUIET=1 serverutils run motd/solen-motd --
   fi
 fi
