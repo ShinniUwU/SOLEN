@@ -7,22 +7,12 @@ on:
       - 'serverutils'
       - 'Scripts/**'
       - '.editorconfig'
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.png'
-      - '**/*.jpg'
-      - '**/*.md'
   push:
     branches: [ main ]
     paths:
       - 'serverutils'
       - 'Scripts/**'
       - '.editorconfig'
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.png'
-      - '**/*.jpg'
-      - '**/*.md'
 
 permissions:
   contents: read
