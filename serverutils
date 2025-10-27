@@ -796,6 +796,8 @@ Usage:
   serverutils setup                 # quickstart policy + units install
   serverutils setup-motd            # print shell config snippet to enable auto-MOTD
   serverutils setup-motd-system     # print system-wide SSH MOTD snippets (update-motd/profile.d)
+  serverutils update [--check|--apply|--rollback] [--channel ch] [--yes]
+  serverutils status               # show version + cached update info
   serverutils meta <category/name|name|path> [--json]
   serverutils banner
   serverutils validate [--subset PATTERN[,PATTERN..]] [--strict] [--no-policy]
@@ -1012,6 +1014,17 @@ main() {
     setup) cmd_setup_quickstart "$@" ;;
     setup-motd) cmd_setup_motd "$@" ;;
     setup-motd-system) cmd_setup_motd_system "$@" ;;
+    update)
+      local sub="${1:-check}"; shift || true
+      case "$sub" in
+        apply|--apply) cmd_run update/apply -- "$@" ;;
+        rollback|--rollback) cmd_run update/apply -- --rollback "$@" ;;
+        check|--check|"") cmd_run update/check -- "$@" ;;
+        *) echoerr "Unknown update action: $sub"; exit 2 ;;
+      esac
+      ;;
+    status)
+      cmd_run update/status -- "$@" ;;
     doctor) cmd_doctor "$@" ;;
     version) echo "$VERSION (schema $SCHEMA_VERSION)" ;;
     help|-h|--help) show_help ;;

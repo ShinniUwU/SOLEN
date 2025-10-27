@@ -92,8 +92,75 @@ else
   cp -a "$ROOT/." "$PERSIST_DIR/"
 fi
 
+ensure_min_libs() {
+  local libdir="$1/Scripts/lib"
+  mkdir -p "$libdir"
+  # Only write files if missing (do not overwrite if present)
+  if [[ ! -f "$libdir/solen.sh" ]]; then
+    cat > "$libdir/solen.sh" <<'LIB'
+#!/usr/bin/env bash
+solen_ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+solen_host() { hostname 2>/dev/null || uname -n; }
+solen_init_flags() { : "${SOLEN_FLAG_YES:=0}"; : "${SOLEN_FLAG_JSON:=${SOLEN_JSON:-0}}"; : "${SOLEN_FLAG_DRYRUN:=1}"; [ "$SOLEN_FLAG_YES" = 1 ] && SOLEN_FLAG_DRYRUN=0 || true; }
+solen_parse_common_flag() { case "$1" in --yes|-y) SOLEN_FLAG_YES=1; SOLEN_FLAG_DRYRUN=0; return 0;; --dry-run) SOLEN_FLAG_DRYRUN=1; return 0;; --json) SOLEN_FLAG_JSON=1; return 0;; esac; return 1; }
+solen_info() { echo -e "\033[0;36mℹ️  $*\033[0m"; }
+solen_ok()   { echo -e "\033[0;32m✅ $*\033[0m"; }
+solen_warn() { echo -e "\033[0;33m⚠️  $*\033[0m"; }
+solen_err()  { echo -e "\033[0;31m❌ $*\033[0m" 1>&2; }
+solen_json_record() {
+  local status="$1" summary="$2" actions_text="${3:-}" extra="${4:-}" host; host=$(hostname 2>/dev/null || uname -n)
+  _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+  local actions_json="[]"; if [ -n "$actions_text" ]; then actions_json="["; local first=1; while IFS= read -r l; do [ -z "$l" ] && continue; local e; e="$(_esc "$l")"; [ $first -eq 0 ] && actions_json+=" ," || first=0; actions_json+="\"$e\""; done <<EOF
+${actions_text}
+EOF
+  actions_json+="]"; fi
+  printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","actions":%s%s}\n' \
+    "$(_esc "$status")" "$(_esc "$summary")" "$(solen_ts)" "$(_esc "$host")" "$actions_json" "${extra:+,${extra}}"
+}
+LIB
+    chmod +x "$libdir/solen.sh" || true
+  fi
+  if [[ ! -f "$libdir/edit.sh" ]]; then
+    cat > "$libdir/edit.sh" <<'LIB'
+#!/usr/bin/env bash
+solen_insert_marker_block() {
+  local file="$1" begin="$2" end="$3" content="$4" tmp
+  mkdir -p "$(dirname "$file")" 2>/dev/null || true; touch "$file"
+  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{inblk=0} index($0,b)==1{inblk=1;next} index($0,e)==1{inblk=0;next} !inblk{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
+  tail -c1 "$file" >/dev/null 2>&1 || echo >> "$file"
+  { echo "$begin"; printf "%s\n" "$content"; echo "$end"; } >> "$file"
+}
+solen_remove_marker_block() {
+  local file="$1" begin="$2" end="$3" tmp; [ -f "$file" ] || return 0
+  tmp="${file}.tmp.$$"; awk -v b="$begin" -v e="$end" 'BEGIN{inblk=0} index($0,b)==1{inblk=1;next} index($0,e)==1{inblk=0;next} !inblk{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+LIB
+    chmod +x "$libdir/edit.sh" || true
+  fi
+  if [[ ! -f "$libdir/pm.sh" ]]; then
+    cat > "$libdir/pm.sh" <<'LIB'
+#!/usr/bin/env bash
+__SOLEN_PM="unknown"
+pm_detect() { if command -v apt-get >/dev/null 2>&1; then __SOLEN_PM=apt; elif command -v dnf >/dev/null 2>&1; then __SOLEN_PM=dnf; elif command -v pacman >/dev/null 2>&1; then __SOLEN_PM=pacman; elif command -v zypper >/dev/null 2>&1; then __SOLEN_PM=zypper; else __SOLEN_PM=unknown; fi; }
+pm_name() { echo "$__SOLEN_PM"; }
+pm_update_plan() { case "$__SOLEN_PM" in apt) echo "sudo apt-get update -y";; dnf) echo "sudo dnf -y makecache";; pacman) echo "sudo pacman -Sy --noconfirm";; zypper) echo "sudo zypper -n refresh";; *) echo "# pm update (unsupported)";; esac; }
+pm_install_plan() { case "$__SOLEN_PM" in apt) echo "sudo apt-get install -y $*";; dnf) echo "sudo dnf -y install $*";; pacman) echo "sudo pacman -S --noconfirm $*";; zypper) echo "sudo zypper -n install $*";; *) echo "# pm install $* (unsupported)";; esac; }
+pm_check_updates_count() { case "$__SOLEN_PM" in apt) (apt-get -s upgrade 2>/dev/null | awk '/^Inst /{c++} END{print c+0}') || echo 0 ;; dnf) (dnf -q check-update 2>/dev/null | awk 'END{print NR+0}') || echo 0 ;; pacman) (checkupdates 2>/dev/null | wc -l | tr -d ' ') || echo 0 ;; zypper) (zypper -q list-updates 2>/dev/null | awk 'NR>2{c++} END{print c+0}') || echo 0 ;; *) echo 0 ;; esac; }
+LIB
+    chmod +x "$libdir/pm.sh" || true
+  fi
+}
+
+# Ensure libs exist before running installer or update checks
+ensure_min_libs "$PERSIST_DIR"
+
 echo "==> Running installer (dry-run unless --yes provided)"
 ( cd "$PERSIST_DIR" && ./serverutils install "${INSTALL_ARGS[@]}" )
+
+# Prime update cache quietly (non-fatal)
+if command -v jq >/dev/null 2>&1; then
+  ( cd "$PERSIST_DIR" && Scripts/update/check.sh --quiet || true )
+fi
 
 # If interactive and not disabled, launch TUI from the persistent root
 if [[ $SHOW_TUI -eq 1 && -t 1 && "${SOLEN_NO_TUI:-0}" != "1" ]]; then

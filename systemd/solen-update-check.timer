@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly SOLEN update check
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

@@ -37,18 +37,79 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p site/releases
-          # Always required
+          # Require core files and libs
           test -f serverutils
           test -f Scripts/install/install.sh
           test -f Scripts/motd/solen-motd.sh
-          # Warn (but do not fail) if optional libs missing; installer has fallbacks
-          if [ ! -f Scripts/lib/solen.sh ]; then echo "WARN: Scripts/lib/solen.sh missing"; fi
-          if [ ! -f Scripts/lib/edit.sh ]; then echo "WARN: Scripts/lib/edit.sh missing"; fi
-          if [ ! -f Scripts/lib/pm.sh ]; then echo "WARN: Scripts/lib/pm.sh missing"; fi
-          # Build a lean tarball with runner + scripts and assets
-          tar -czf site/releases/solen-latest.tar.gz \
-            serverutils Scripts asset systemd config asciiart.ascii
+          test -f Scripts/lib/solen.sh
+          test -f Scripts/lib/edit.sh
+          test -f Scripts/lib/pm.sh
+          # Update scripts present
+          test -f Scripts/update/check.sh
+          test -f Scripts/update/apply.sh
+          test -f Scripts/update/status.sh
+          # Determine version from serverutils (robust)
+          ver=$(awk -F '"' '/^VERSION=/ {print $2; exit}' serverutils)
+          if [ -z "${ver:-}" ]; then echo "VERSION not found in serverutils" >&2; exit 1; fi
+          # Build versioned tarball with runner + scripts and assets
+          ver_tar="site/releases/solen-${ver}.tar.gz"
+          tar -czf "$ver_tar" serverutils Scripts asset systemd config asciiart.ascii
+          # Verify tarball contains required libs
+          tar -tf "$ver_tar" | grep -q '^Scripts/lib/solen.sh$'
+          tar -tf "$ver_tar" | grep -q '^Scripts/lib/edit.sh$'
+          tar -tf "$ver_tar" | grep -q '^Scripts/lib/pm.sh$'
+          # Create channel pointers and legacy latest name
+          cp -f "$ver_tar" site/releases/solen-stable.tar.gz
+          cp -f "$ver_tar" site/releases/solen-rc.tar.gz
+          cp -f "$ver_tar" site/releases/solen-nightly.tar.gz
+          cp -f "$ver_tar" site/releases/solen-latest.tar.gz
+          # Checksums for each published filename
+          (cd site/releases && sha256sum "solen-${ver}.tar.gz" > "solen-${ver}.tar.gz.sha256")
+          (cd site/releases && sha256sum solen-stable.tar.gz > solen-stable.tar.gz.sha256)
+          (cd site/releases && sha256sum solen-rc.tar.gz > solen-rc.tar.gz.sha256)
+          (cd site/releases && sha256sum solen-nightly.tar.gz > solen-nightly.tar.gz.sha256)
           (cd site/releases && sha256sum solen-latest.tar.gz > solen-latest.tar.gz.sha256)
+      - name: Build channel manifests
+        run: |
+          set -euo pipefail
+          ver=$(awk -F '"' '/^VERSION=/ {print $2; exit}' serverutils)
+          test -n "$ver"
+          sha_stable=$(awk '{print $1}' site/releases/solen-stable.tar.gz.sha256)
+          sha_rc=$(awk '{print $1}' site/releases/solen-rc.tar.gz.sha256)
+          sha_nightly=$(awk '{print $1}' site/releases/solen-nightly.tar.gz.sha256)
+          base="https://solen.shinni.dev"
+          url_stable="$base/releases/solen-stable.tar.gz"
+          url_rc="$base/releases/solen-rc.tar.gz"
+          url_nightly="$base/releases/solen-nightly.tar.gz"
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          # Optional signing: provide SOLEN_SIGNING_KEY_PEM secret (PEM-encoded RSA/EC)
+          sign() {
+            keyfile="$1"; data="$2"
+            if base64 --help 2>&1 | grep -q '\-w'; then
+              printf '%s' "$data" | openssl dgst -sha256 -sign "$keyfile" -binary | base64 -w0
+            else
+              printf '%s' "$data" | openssl dgst -sha256 -sign "$keyfile" -binary | base64 | tr -d '\n'
+            fi
+          }
+          sig_algo="rsa-sha256"
+          have_key=0
+          if [ -n "${{ secrets.SOLEN_SIGNING_KEY_PEM }}" ]; then
+            have_key=1
+            printf '%s' "${{ secrets.SOLEN_SIGNING_KEY_PEM }}" > /tmp/solen_signing_key.pem
+            # Compute public key fingerprint (sha256 of DER pubkey)
+            pub_fp=$(openssl pkey -in /tmp/solen_signing_key.pem -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
+          fi
+          build_manifest() {
+            ch="$1"; url="$2"; sha="$3"
+            sig=""; str="${ver}|${sha}|${url}|${ts}|${ch}"
+            if [ $have_key -eq 1 ]; then sig=$(sign /tmp/solen_signing_key.pem "$str"); fi
+            cat > site/releases/manifest-${ch}.json << MAN
+{ "channel":"${ch}", "version":"${ver}", "url":"${url}", "sha256":"${sha}", "breaking": false, "date":"${ts}", "notes_url":"${base}/CHANGELOG#v${ver}"${sig:+, "sig_algo":"${sig_algo}", "sig_b64":"${sig}", "sig_fields":"version|sha256|url|date|channel", "sig_pubkey_fp":"sha256:${pub_fp}"} }
+MAN
+          }
+          build_manifest stable "$url_stable" "$sha_stable"
+          build_manifest rc "$url_rc" "$sha_rc"
+          build_manifest nightly "$url_nightly" "$sha_nightly"
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

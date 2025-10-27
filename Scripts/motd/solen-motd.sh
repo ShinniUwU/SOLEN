@@ -272,6 +272,50 @@ print_human() {
   local net_line
   net_line="${C_KEY}Net${C_RESET}:  iface ${C_VAL}${def}${C_RESET}  ${C_DIM}IPv4${C_RESET} ${C_VAL}${if4:-none}${C_RESET}  ${C_DIM}IPv6${C_RESET} ${C_VAL}${if6:-none}${C_RESET}"
   w "$net_line"
+
+  # Soft update reminder (read cached info only; no network here)
+  local cache="${XDG_STATE_HOME:-$HOME/.local/state}/solen/update-cache.json"
+  if [ -f "$cache" ]; then
+    local inst latest upd ch
+    inst=$("${THIS_DIR}/../../serverutils" version 2>/dev/null | awk '{print $1}')
+    latest=$(jq -r '.version // empty' "$cache" 2>/dev/null || true)
+    ch=$(jq -r '.channel // "stable"' "$cache" 2>/dev/null || true)
+    # SemVer compare with basic pre-release handling: rc/nightly < final
+    if [ -n "$inst" ] && [ -n "$latest" ]; then
+      inst_main="${inst%%-*}"; latest_main="${latest%%-*}"
+      inst_pre="${inst#${inst_main}}"; latest_pre="${latest#${latest_main}}"
+      cmp_main=$(awk -v A="$inst_main" -v B="$latest_main" 'BEGIN{n=split(A,a,".");m=split(B,b,"."); for(i=1;i<= (n>m?n:m); i++){aa=(i<=n?a[i]:0);bb=(i<=m?b[i]:0); if(aa+0<bb+0){print -1; exit} if(aa+0>bb+0){print 1; exit}} print 0}')
+      if [ "$cmp_main" -lt 0 ]; then cmp=-1
+      elif [ "$cmp_main" -gt 0 ]; then cmp=1
+      else
+        # Same main; treat pre-release as lower than final
+        if [ -n "$inst_pre" ] && [ -z "$latest_pre" ]; then cmp=-1
+        elif [ -z "$inst_pre" ] && [ -n "$latest_pre" ]; then cmp=1
+        else cmp=0; fi
+      fi
+      if [ "$cmp" -lt 0 ]; then
+        # Show at most once per day per version
+        local stamp_dir="${XDG_STATE_HOME:-$HOME/.local/state}/solen"
+        local stamp_file="$stamp_dir/update-notify.json"
+        mkdir -p "$stamp_dir" 2>/dev/null || true
+        local today; today=$(date -u +%F)
+        # Additionally, suppress if checked very recently (< 1h)
+        local checked_recent=0; last_check="$(jq -r '.checked_at // empty' "$cache" 2>/dev/null || true)"
+        if [ -n "$last_check" ]; then
+          if [ $(( $(date -u +%s) - $(date -u -d "$last_check" +%s 2>/dev/null || echo 0) )) -lt 3600 ]; then checked_recent=1; fi
+        fi
+        local stamped_ver stamped_date
+        if [ -f "$stamp_file" ]; then
+          stamped_ver=$(jq -r '.version // empty' "$stamp_file" 2>/dev/null || true)
+          stamped_date=$(jq -r '.date // empty' "$stamp_file" 2>/dev/null || true)
+        fi
+        if { [ "$stamped_ver" != "$latest" ] || [ "$stamped_date" != "$today" ]; } && [ $checked_recent -eq 0 ]; then
+          w "${C_DIM}· solen: update available — ${inst} → ${latest} (${ch}); run ${C_VAL}serverutils update --apply${C_RESET}"
+          printf '{"version":"%s","date":"%s"}\n' "$latest" "$today" > "$stamp_file" 2>/dev/null || true
+        fi
+      fi
+    fi
+  fi
 }
 
 print_json() {

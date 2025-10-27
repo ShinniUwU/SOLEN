@@ -155,7 +155,7 @@ install_motd_hooks_user() {
     "# >>> SOLEN MOTD_BASH (do not edit) >>>" \
     "# <<< SOLEN MOTD_BASH (managed) <<<" \
     "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_bash.sh")"
-  if [[ -f "$HOME/.bash_profile" ]] && ! grep -Fq ">>> SOLEN BASH_PROFILE_INCLUDE" "$HOME/.bash_profile"; then
+  if ! grep -Fq ">>> SOLEN BASH_PROFILE_INCLUDE" "$HOME/.bash_profile" 2>/dev/null; then
     solen_insert_marker_block "$HOME/.bash_profile" \
       "# >>> SOLEN BASH_PROFILE_INCLUDE (do not edit) >>>" \
       "# <<< SOLEN BASH_PROFILE_INCLUDE (managed) <<<" \

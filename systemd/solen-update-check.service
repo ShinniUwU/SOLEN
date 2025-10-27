@@ -1,0 +1,13 @@
+[#] SOLEN periodic update check (user scope default)
+[Unit]
+Description=SOLEN update manifest check
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/solen/latest/Scripts/update/check.sh --quiet
+WorkingDirectory=%h/.local/share/solen/latest
+StandardOutput=journal
+StandardError=journal
+
