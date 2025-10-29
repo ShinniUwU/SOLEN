@@ -54,10 +54,13 @@ jobs:
           # Build versioned tarball with runner + scripts and assets
           ver_tar="site/releases/solen-${ver}.tar.gz"
           tar -czf "$ver_tar" serverutils Scripts asset systemd config asciiart.ascii
-          # Verify tarball contains required libs
-          tar -tf "$ver_tar" | grep -q '^Scripts/lib/solen.sh$'
-          tar -tf "$ver_tar" | grep -q '^Scripts/lib/edit.sh$'
-          tar -tf "$ver_tar" | grep -q '^Scripts/lib/pm.sh$'
+          # Verify tarball contains required libs (avoid SIGPIPE under pipefail)
+          tmp_tar_list=$(mktemp)
+          tar -tf "$ver_tar" > "$tmp_tar_list"
+          grep -Fxq 'Scripts/lib/solen.sh' "$tmp_tar_list"
+          grep -Fxq 'Scripts/lib/edit.sh' "$tmp_tar_list"
+          grep -Fxq 'Scripts/lib/pm.sh' "$tmp_tar_list"
+          rm -f "$tmp_tar_list"
           # Create channel pointers and legacy latest name
           cp -f "$ver_tar" site/releases/solen-stable.tar.gz
           cp -f "$ver_tar" site/releases/solen-rc.tar.gz
