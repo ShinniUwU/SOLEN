@@ -97,3 +97,7 @@ Thumbs.db
 
 # dont commit diff files
 *.diff
+
+# keep SOLEN libs used by CI
+!Scripts/lib/
+!Scripts/lib/**
