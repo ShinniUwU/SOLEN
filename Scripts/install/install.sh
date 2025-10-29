@@ -151,6 +151,20 @@ path_check_msg() {
 install_motd_hooks_user() {
   # Install guarded blocks for common shells regardless of current $SHELL
   # Bash
+  # Ensure ~/.local/bin precedes PATH in interactive shells so 'serverutils' resolves in subshells
+  if ! grep -Fq ">>> SOLEN PATH_USER_LOCAL" "$HOME/.bashrc" 2>/dev/null; then
+    solen_insert_marker_block "$HOME/.bashrc" \
+      "# >>> SOLEN PATH_USER_LOCAL (do not edit) >>>" \
+      "# <<< SOLEN PATH_USER_LOCAL (managed) <<<" \
+      "$(cat <<'EOS'
+# Ensure ~/.local/bin on PATH
+if [ -d "$HOME/.local/bin" ]; then
+  case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH";; esac
+  export PATH
+fi
+EOS
+)"
+  fi
   solen_insert_marker_block "$HOME/.bashrc" \
     "# >>> SOLEN MOTD_BASH (do not edit) >>>" \
     "# <<< SOLEN MOTD_BASH (managed) <<<" \
