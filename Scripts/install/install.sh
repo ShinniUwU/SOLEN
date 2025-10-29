@@ -190,6 +190,16 @@ EOS
 
 install_motd_hooks_global() {
   echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/profile.d_solen.sh")" | sudo tee /etc/profile.d/solen.sh >/dev/null
+  # update-motd hook for SSH logins (Debian/Ubuntu/Proxmox)
+  if [ -d /etc/update-motd.d ]; then
+    sudo tee /etc/update-motd.d/90-solen >/dev/null <<'E'
+#!/bin/sh
+[ -x /usr/local/bin/serverutils ] || exit 0
+[ -t 1 ] || exit 0
+serverutils run motd/solen-motd -- --full
+E
+    sudo chmod +x /etc/update-motd.d/90-solen
+  fi
   if command -v fish >/dev/null 2>&1; then
     echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/conf.d_solen.fish")" | sudo tee /etc/fish/conf.d/solen.fish >/dev/null
   fi
