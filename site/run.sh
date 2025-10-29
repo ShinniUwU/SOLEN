@@ -30,11 +30,14 @@ while [[ $# -gt 0 ]]; do
 done
 INSTALL_ARGS=("${BOOT_ARGS[@]}"); [[ $# -gt 0 ]] && INSTALL_ARGS+=("$@")
 
-# Determine desired scope from forwarded flags (default: user)
-SCOPE="user"
+# Determine desired scope from forwarded flags (default: user) and ensure flag is passed through
+SCOPE="user"; HAVE_SCOPE_FLAG=0
 for a in "${INSTALL_ARGS[@]}"; do
-  case "$a" in --global) SCOPE="global" ;; --user) SCOPE="user" ;; esac
+  case "$a" in --global) SCOPE="global"; HAVE_SCOPE_FLAG=1 ;; --user) SCOPE="user"; HAVE_SCOPE_FLAG=1 ;; esac
 done
+if [[ $HAVE_SCOPE_FLAG -eq 0 ]]; then
+  INSTALL_ARGS+=("--${SCOPE}")
+fi
 
 # Default to enabling MOTD unless explicitly provided
 has_with_motd=0
