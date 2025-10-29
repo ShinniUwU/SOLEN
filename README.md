@@ -14,42 +14,38 @@ Every script follows a common format for safe dry-runs, JSON output, and unified
 
 ## 🚀 **Quick Start**
 
-### 1. Clone and enter the repo
+Install via one command (per‑user, with MOTD, safe by default):
+
+```bash
+bash <(curl -sL https://solen.shinni.dev/run.sh) --user --with-motd --yes
+```
+
+What this does
+- Downloads a verified release, installs a persistent copy under `~/.local/share/solen/latest`, and puts `serverutils` on your PATH (`~/.local/bin`).
+- Adds a guarded MOTD snippet for your shell (bash/zsh/fish). You’ll see a colored system summary on new shells.
+- Launches a TUI once (skip with `--no-tui`).
+
+System‑wide install (admins):
+
+```bash
+bash <(curl -sL https://solen.shinni.dev/run.sh) --global --with-motd --yes
+```
+
+This also installs an `/etc/update-motd.d/90-solen` hook on Debian/Ubuntu/Proxmox so SSH logins show the full MOTD.
+
+Open the runner any time:
+
+```bash
+serverutils           # TUI
+serverutils list      # scripts with summaries
+```
+
+Developers — clone instead of curl:
 
 ```bash
 git clone https://github.com/ShinniUwU/SOLEN.git
 cd SOLEN
-```
-
-### 2. Make the runner executable
-
-```bash
-chmod +x serverutils
-```
-
-### 3. Run it locally (no install needed)
-
-```bash
 ./serverutils list
-./serverutils run motd/solen-motd -- --plain
-./serverutils run health/check
-```
-
-### 4. (Optional) Install globally or per-user
-
-```bash
-# User install (recommended)
-./serverutils install-runner --user
-export PATH="$HOME/.local/bin:$PATH"
-
-# Or system-wide (requires sudo)
-sudo ./serverutils install-runner --global
-```
-
-Now you can invoke it from anywhere:
-
-```bash
-serverutils list
 ```
 
 ---
@@ -67,6 +63,37 @@ The `serverutils` CLI discovers and executes any SOLEN script in the `Scripts/` 
 
 **Audit logs** are written to `~/.serverutils/audit.log`.
 Override with `SOLEN_AUDIT_LOG` or `SOLEN_AUDIT_DIR`.
+
+### Updates you can trust (quiet, atomic, rollback)
+
+- Check quietly (reads channel manifest; caches result under `~/.local/state/solen`):
+
+```bash
+serverutils update             # same as: update check
+serverutils status             # one‑liner update status
+```
+
+- Apply an update (verifies checksum and optional signature, swaps atomically, keeps rollback):
+
+```bash
+serverutils update apply --yes
+serverutils update --rollback   # instant rollback to previous
+```
+
+- Channels: `stable` (default), `rc`, `nightly` — set via `SOLEN_CHANNEL`.
+
+- Background weekly check (user):
+
+```bash
+serverutils install-units --user
+systemctl --user daemon-reload
+systemctl --user enable --now solen-update-check.timer
+```
+
+Security:
+- Manifests include sha256 and can be signed in CI. To enforce verification, set `SOLEN_SIGN_PUBKEY_PEM` (PEM public key)
+  and optional `SOLEN_REQUIRE_SIGNATURE=1` on hosts.
+- Updates stage to a temp dir, copy into `~/.local/share/solen/latest`, and keep `latest-prev` for rollback.
 
 ---
 
@@ -161,30 +188,33 @@ serverutils list
 
 ## 🪄 **Show MOTD on Login (Optional)**
 
-To display the SOLEN system summary when opening a terminal:
+The installer writes guarded blocks to bash/zsh/fish rc files so new shells show a colored system summary.
+System‑wide installs also add `/etc/update-motd.d/90-solen` for SSH logins.
 
 **Bash / Zsh**
 
 ```bash
-[[ $- == *i* ]] && serverutils run motd/solen-motd -- --plain
+[[ $- == *i* ]] && serverutils run motd/solen-motd -- --full
 ```
 
 **Fish**
 
 ```fish
 if status is-interactive
-    serverutils run motd/solen-motd -- --plain
+    serverutils run motd/solen-motd -- --full
 end
 ```
 
-Or run:
+Or let the runner print a tailored snippet:
 
 ```bash
 serverutils setup-motd
 ```
 
-It prints the snippet for your shell — no files modified automatically.
-See [`docs/MOTD.md`](./docs/MOTD.md) for system-wide SSH setup.
+Tips
+- Hooks run the runner with `SOLEN_RUN_QUIET=1` to hide extra chatter.
+- Prefer monochrome? replace `--full` with `--plain`.
+- See [`docs/MOTD.md`](./docs/MOTD.md) for details and system-wide setup.
 
 ---
 
