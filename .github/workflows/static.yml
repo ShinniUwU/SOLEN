@@ -103,9 +103,12 @@ jobs:
             ch="$1"; url="$2"; sha="$3"
             sig=""; str="${ver}|${sha}|${url}|${ts}|${ch}"
             if [ $have_key -eq 1 ]; then sig=$(sign /tmp/solen_signing_key.pem "$str"); fi
-            cat > site/releases/manifest-${ch}.json << MAN
-{ "channel":"${ch}", "version":"${ver}", "url":"${url}", "sha256":"${sha}", "breaking": false, "date":"${ts}", "notes_url":"${base}/CHANGELOG#v${ver}"${sig:+, "sig_algo":"${sig_algo}", "sig_b64":"${sig}", "sig_fields":"version|sha256|url|date|channel", "sig_pubkey_fp":"sha256:${pub_fp}"} }
-MAN
+            json='{ "channel":"'"${ch}"'", "version":"'"${ver}"'", "url":"'"${url}"'", "sha256":"'"${sha}"'", "breaking": false, "date":"'"${ts}"'", "notes_url":"'"${base}"'/CHANGELOG#v'"${ver}"'"'
+            if [ -n "$sig" ]; then
+              json+=', "sig_algo":"'"${sig_algo}"'", "sig_b64":"'"${sig}"'", "sig_fields":"version|sha256|url|date|channel", "sig_pubkey_fp":"sha256:'"${pub_fp}"'"'
+            fi
+            json+=' }'
+            printf '%s\n' "$json" > "site/releases/manifest-${ch}.json"
           }
           build_manifest stable "$url_stable" "$sha_stable"
           build_manifest rc "$url_rc" "$sha_rc"
