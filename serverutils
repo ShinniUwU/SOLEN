@@ -297,9 +297,28 @@ cmd_home() {
           printf "Enter key/name to run (blank to return): "
           read -r runkey
           if [[ -n "$runkey" ]]; then
-            printf "Extra args (after --), or blank: "
-            read -r extra
-            if [[ -n "$extra" ]]; then cmd_run "$runkey" -- $extra; else cmd_run "$runkey"; fi
+            # Pre-resolve here to surface ambiguities before asking for extra args
+            local candidates chosen
+            candidates="$(resolve_script_by_key_or_name "$runkey")"
+            if [[ -z "$candidates" ]]; then
+              echoerr "No matches for '$runkey'"
+              :
+            elif [[ "$(printf '%s\n' "$candidates" | wc -l)" -gt 1 ]]; then
+              chosen="$(printf '%s\n' "$candidates" | choose_interactively)" || chosen=""
+              if [[ -z "$chosen" ]]; then
+                echowarn "Selection canceled"
+                :
+              else
+                printf "Extra args (after --), or blank: "
+                read -r extra
+                if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
+              fi
+            else
+              chosen="$candidates"
+              printf "Extra args (after --), or blank: "
+              read -r extra
+              if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
+            fi
           fi
           ;;
         2)
@@ -308,8 +327,14 @@ cmd_home() {
           if [[ -n "$q" ]]; then
             resolved="$(resolve_script_by_key_or_name "$q")"
             if [[ -z "$resolved" ]]; then echoerr "No matches"; else
-              chosen="$(printf '%s\n' "$resolved" | choose_interactively)"
-              [[ -n "$chosen" ]] && cmd_run "$chosen"
+              chosen="$(printf '%s\n' "$resolved" | choose_interactively)" || chosen=""
+              if [[ -n "$chosen" ]]; then
+                printf "Extra args (after --), or blank: "
+                read -r extra
+                if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
+              else
+                echowarn "Selection canceled"
+              fi
             fi
           fi
           ;;
@@ -317,16 +342,32 @@ cmd_home() {
           printf "Enter key/name to run: "
           read -r runkey
           if [[ -n "$runkey" ]]; then
-            printf "Extra args (after --), or blank: "
-            read -r extra
-            if [[ -n "$extra" ]]; then cmd_run "$runkey" -- $extra; else cmd_run "$runkey"; fi
+            local candidates chosen
+            candidates="$(resolve_script_by_key_or_name "$runkey")"
+            if [[ -z "$candidates" ]]; then
+              echoerr "No matches for '$runkey'"
+            elif [[ "$(printf '%s\n' "$candidates" | wc -l)" -gt 1 ]]; then
+              chosen="$(printf '%s\n' "$candidates" | choose_interactively)" || chosen=""
+              if [[ -z "$chosen" ]]; then
+                echowarn "Selection canceled"
+              else
+                printf "Extra args (after --), or blank: "
+                read -r extra
+                if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
+              fi
+            else
+              chosen="$candidates"
+              printf "Extra args (after --), or blank: "
+              read -r extra
+              if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
+            fi
           fi
           ;;
-        3) cmd_run health/check; ;;
-        4) cmd_run system-maintenance/update-and-report -- --dry-run; ;;
-        5) cmd_install_runner --user; ;;
-        6) cmd_overview; ;;
-        7) cmd_setup_motd; ;;
+        3) cmd_run health/check || true; ;;
+        4) cmd_run system-maintenance/update-and-report -- --dry-run || true; ;;
+        5) cmd_install_runner --user || true; ;;
+        6) cmd_overview || true; ;;
+        7) cmd_setup_motd || true; ;;
         q|Q|"" ) break ;;
         *) echoerr "Unknown choice" ;;
       esac
@@ -403,10 +444,14 @@ choose_interactively() {
     printf "  [%d] %s (%s)\n" "$i" "$key" "$it"
     i=$((i+1))
   done
-  printf "Select [1-%d]: " "$count"
+  printf "Select [1-%d] (blank cancels): " "$count"
   local sel
   read -r sel
-  if [[ -z "$sel" ]] || ! [[ "$sel" =~ ^[0-9]+$ ]] || (( sel < 1 || sel > count )); then
+  if [[ -z "$sel" ]]; then
+    echowarn "Selection canceled"
+    return 2
+  fi
+  if ! [[ "$sel" =~ ^[0-9]+$ ]] || (( sel < 1 || sel > count )); then
     echoerr "Invalid selection"
     return 2
   fi
@@ -951,6 +996,7 @@ main() {
         if [[ $no_policy -eq 1 ]]; then env_prefix+=" SOLEN_POLICY=/dev/null"; fi
         # try both flags and env
         set +e
+        [[ -x "$f" ]] || chmod +x "$f" 2>/dev/null || true
         out=$(eval "$env_prefix" "$f" --json --dry-run 2>/dev/null)
         rc=$?
         set -e
