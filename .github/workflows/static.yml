@@ -66,10 +66,12 @@ jobs:
           # Verify tarball contains required libs (avoid SIGPIPE under pipefail)
           tmp_tar_list=$(mktemp)
           tar -tf "$ver_tar" > "$tmp_tar_list"
-          grep -Fxq 'Scripts/lib/solen.sh' "$tmp_tar_list"
-          grep -Fxq 'Scripts/lib/edit.sh' "$tmp_tar_list"
-          grep -Fxq 'Scripts/lib/pm.sh' "$tmp_tar_list"
-          grep -Fxq 'Scripts/lib/policy.sh' "$tmp_tar_list"
+          # Normalize './' prefix if present so checks are robust across tar variants
+          sed -e 's#^\./##' "$tmp_tar_list" > "$tmp_tar_list.norm"
+          grep -Fxq 'Scripts/lib/solen.sh' "$tmp_tar_list.norm"
+          grep -Fxq 'Scripts/lib/edit.sh' "$tmp_tar_list.norm"
+          grep -Fxq 'Scripts/lib/pm.sh' "$tmp_tar_list.norm"
+          grep -Fxq 'Scripts/lib/policy.sh' "$tmp_tar_list.norm"
           rm -f "$tmp_tar_list"
           # Create channel pointers and legacy latest name
           cp -f "$ver_tar" site/releases/solen-stable.tar.gz
