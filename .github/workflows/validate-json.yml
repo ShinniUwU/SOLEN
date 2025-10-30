@@ -1,0 +1,36 @@
+name: Validate JSON Outputs ✅
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'serverutils'
+      - 'Scripts/**'
+      - 'docs/**'
+      - 'ci/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'serverutils'
+      - 'Scripts/**'
+      - 'docs/**'
+      - 'ci/**'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-json:
+    name: Validate NDJSON contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+      - name: Run validation script
+        run: |
+          bash ci/validate-json.sh
+

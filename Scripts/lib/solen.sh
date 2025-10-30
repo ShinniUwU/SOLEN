@@ -69,3 +69,13 @@ solen_json_record_full() {
   local status="$1" summary="$2" details_fragment="$3"
   solen_json_record "$status" "$summary" "" "$details_fragment"
 }
+
+# Try to source policy helpers if available; otherwise permissive fallbacks
+__SOLEN_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${__SOLEN_LIB_DIR}/policy.sh" ]; then
+  . "${__SOLEN_LIB_DIR}/policy.sh"
+else
+  solen_policy_allows_token() { return 0; }
+  solen_policy_allows_service_restart() { return 0; }
+  solen_policy_allows_prune_path() { return 0; }
+fi

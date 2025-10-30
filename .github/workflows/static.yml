@@ -44,6 +44,7 @@ jobs:
           test -f Scripts/lib/solen.sh
           test -f Scripts/lib/edit.sh
           test -f Scripts/lib/pm.sh
+          test -f Scripts/lib/policy.sh
           # Update scripts present
           test -f Scripts/update/check.sh
           test -f Scripts/update/apply.sh
@@ -60,6 +61,7 @@ jobs:
           grep -Fxq 'Scripts/lib/solen.sh' "$tmp_tar_list"
           grep -Fxq 'Scripts/lib/edit.sh' "$tmp_tar_list"
           grep -Fxq 'Scripts/lib/pm.sh' "$tmp_tar_list"
+          grep -Fxq 'Scripts/lib/policy.sh' "$tmp_tar_list"
           rm -f "$tmp_tar_list"
           # Create channel pointers and legacy latest name
           cp -f "$ver_tar" site/releases/solen-stable.tar.gz

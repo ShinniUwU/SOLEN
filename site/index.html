@@ -1,8 +1,23 @@
 <!doctype html><meta charset="utf-8">
 <title>SOLEN — Bootstrap</title>
-<pre>Quick install (shows TUI, applies MOTD):
-bash <(curl -sL https://solen.shinni.dev/run.sh) --user --with-motd --yes
+<pre>
+Quick install (per-user, shows TUI, applies MOTD):
+  bash <(curl -sL https://solen.shinni.dev/run.sh) --user --with-motd --yes
+
+System-wide (admins):
+  bash <(curl -sL https://solen.shinni.dev/run.sh) --global --with-motd --yes
 
 Disable auto-TUI:
-bash <(curl -sL https://solen.shinni.dev/run.sh) --no-tui --user --with-motd --yes
+  bash <(curl -sL https://solen.shinni.dev/run.sh) --no-tui --user --with-motd --yes
+
+Use signed channel manifest (stable):
+  export SOLEN_SIGN_PUBKEY_PEM="$(cat /path/to/pubkey.pem)"  # optional
+  bash <(curl -sL https://solen.shinni.dev/run.sh) --channel stable --user --with-motd --yes
+
+Verify install:
+  serverutils status
+  serverutils list --long
+  serverutils run health/check -- --json
+
+Project: https://github.com/ShinniUwU/SOLEN
 </pre>

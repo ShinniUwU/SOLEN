@@ -16,7 +16,18 @@ while [[ $# -gt 0 ]]; do
   case "$1" in --json) JSON=1; shift ;; -h|--help) echo "Usage: $(basename "$0") [--json]"; exit 0 ;; *) shift;; esac
 done
 
-installed_ver="$(./serverutils version 2>/dev/null || true)"
+installed_ver=""
+if command -v serverutils >/dev/null 2>&1; then
+  installed_ver="$(serverutils version 2>/dev/null || true)"
+fi
+# Fallback to repo-local runner if available
+if [[ -z "$installed_ver" ]]; then
+  THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
+  if [[ -x "${ROOT_DIR}/serverutils" ]]; then
+    installed_ver="$("${ROOT_DIR}/serverutils" version 2>/dev/null || true)"
+  fi
+fi
 installed_ver="${installed_ver%% *}"
 CACHEFILE="${XDG_STATE_HOME:-$HOME/.local/state}/solen/update-cache.json"
 latest_ver=""; channel="stable"; checked_at=""
@@ -46,4 +57,3 @@ else
   fi
 fi
 exit 0
-

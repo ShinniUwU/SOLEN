@@ -1,0 +1,44 @@
+name: ShellCheck Lint 🧪
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'serverutils'
+      - 'Scripts/**'
+      - 'site/run.sh'
+      - 'ci/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'serverutils'
+      - 'Scripts/**'
+      - 'site/run.sh'
+      - 'ci/**'
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck (bash lints)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y shellcheck
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          echo "Linting shell scripts with shellcheck"
+          shellcheck -V
+          # Lint top-level runner and site bootstrap
+          shellcheck -e SC1090 -e SC1091 serverutils site/run.sh || true
+          # Lint Scripts and CI scripts
+          find Scripts -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -e SC1090 -e SC1091 || true
+          find ci -type f -name '*.sh' -print0 | xargs -0 -r shellcheck -e SC1090 -e SC1091 || true
+

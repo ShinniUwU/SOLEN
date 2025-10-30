@@ -900,14 +900,14 @@ cmd_setup_motd() {
   echoinfo "Detected shell: ${cur_shell} (suggested file: ${suggest})"
   echo
   echo "Bash — add to ~/.bashrc:"
-  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
+  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --full"
   echo
   echo "Zsh — add to ~/.zshrc:"
-  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --plain"
+  echo "  [[ \$- == *i* ]] && serverutils run motd/solen-motd -- --full"
   echo
   echo "Fish — add to ~/.config/fish/config.fish:"
   echo "  if status is-interactive"
-  echo "      serverutils run motd/solen-motd -- --plain"
+  echo "      serverutils run motd/solen-motd -- --full"
   echo "  end"
   echo
   echoinfo "System-wide (admin): create /etc/profile.d/solen-motd.sh with the bash/zsh line"
@@ -922,13 +922,14 @@ cmd_setup_motd_system() {
 #!/bin/sh
 [ -x /usr/local/bin/serverutils ] || exit 0
 [ -t 1 ] || exit 0
-serverutils run motd/solen-motd -- --plain
+serverutils run motd/solen-motd -- --full
 E
   echo
+  
   echo "Then: chmod +x /etc/update-motd.d/90-solen"
   echo
   echo "Red Hat/Fedora (or no update-motd) — /etc/profile.d/solen-motd.sh:"
-  echo '  [ "$PS1" ] && [ -x /usr/local/bin/serverutils ] && serverutils run motd/solen-motd -- --plain'
+  echo '  [ "$PS1" ] && [ -x /usr/local/bin/serverutils ] && serverutils run motd/solen-motd -- --full'
   echo
   echoinfo "Remove the file(s) to disable. Docs: docs/MOTD.md"
 }

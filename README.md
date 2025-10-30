@@ -40,6 +40,14 @@ serverutils           # TUI
 serverutils list      # scripts with summaries
 ```
 
+Verify the install:
+
+```bash
+serverutils status                 # installed vs latest version
+serverutils list --long            # categories with one-line summaries
+serverutils run health/check -- --json   # quick JSON health snapshot
+```
+
 Developers — clone instead of curl:
 
 ```bash
@@ -94,6 +102,9 @@ Security:
 - Manifests include sha256 and can be signed in CI. To enforce verification, set `SOLEN_SIGN_PUBKEY_PEM` (PEM public key)
   and optional `SOLEN_REQUIRE_SIGNATURE=1` on hosts.
 - Updates stage to a temp dir, copy into `~/.local/share/solen/latest`, and keep `latest-prev` for rollback.
+ - The bootstrap also supports channels and signature verification:
+   - `bash <(curl -sL https://solen.shinni.dev/run.sh) --channel stable --user --with-motd --yes`
+   - When `SOLEN_SIGN_PUBKEY_PEM` is set, the manifest signature is verified before applying.
 
 ---
 
@@ -236,6 +247,25 @@ Tips
 * `SOLEN_NOOP=1` forces dry-run behavior globally.
 * `SOLEN_LOG_DIR=/path` overrides the default log base (`/var/log/solen` or `~/.local/share/solen`).
 * `SOLEN_ASSUME_YES=1` bypasses confirmation prompts.
+* Supported distros: Debian/Ubuntu first-class; Fedora/Arch/openSUSE best-effort via the package abstraction.
+
+---
+
+## ♻️ Uninstall
+
+Per‑user uninstall (runner symlinks and hooks):
+
+```bash
+serverutils install --uninstall --user --yes
+```
+
+Remove everything installed by SOLEN (user scope):
+
+```bash
+serverutils install --uninstall-everything --user --yes
+```
+
+System‑wide variants use `--global` and may require `sudo`.
 
 ---
 

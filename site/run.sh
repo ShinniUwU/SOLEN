@@ -7,6 +7,7 @@ set -Eeuo pipefail
 
 BASE_URL="${SOLEN_BASE_URL:-https://solen.shinni.dev}"
 RELEASE="${SOLEN_RELEASE:-latest}"
+CHANNEL=""
 TARBALL_URL="${BASE_URL}/releases/solen-${RELEASE}.tar.gz"
 CHECKSUM_URL="${TARBALL_URL}.sha256"
 
@@ -17,13 +18,14 @@ BOOT_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --release) RELEASE="$2"; shift 2;;
+    --channel) CHANNEL="$2"; shift 2;;
     --source) SRC_URL="$2"; shift 2;;
     --no-verify) NO_VERIFY=1; shift;;
     --keep) KEEP=1; shift;;
     --no-tui) SHOW_TUI=0; shift;;
     --tui) SHOW_TUI=1; shift;;
     -h|--help)
-      echo "usage: bash <(curl -sL ${BASE_URL}/run.sh) [--release vX.Y.Z|latest] [--source URL] [--no-verify] [--keep] -- [installer flags]"; exit 0;;
+      echo "usage: bash <(curl -sL ${BASE_URL}/run.sh) [--release vX.Y.Z|latest] [--channel stable|rc|nightly] [--source URL] [--no-verify] [--keep] -- [installer flags]"; exit 0;;
     --) shift; break;;
     *) BOOT_ARGS+=("$1"); shift;;
   esac
@@ -63,17 +65,52 @@ command -v sha256sum >/dev/null || command -v shasum >/dev/null || { echo "need 
 WORKDIR="$(mktemp -d -t solen.XXXXXX)"; cleanup(){ [[ $KEEP -eq 1 ]] || rm -rf "$WORKDIR"; }; trap cleanup EXIT INT TERM
 
 TARBALL_PATH="${WORKDIR}/solen.tar.gz"
-if command -v curl >/dev/null; then curl -fsSL "$TARBALL_URL" -o "$TARBALL_PATH"; else wget -qO "$TARBALL_PATH" "$TARBALL_URL"; fi
 
-if [[ $NO_VERIFY -eq 0 && -n "$CHECKSUM_URL" ]]; then
-  SUMFILE="${WORKDIR}/solen.sha256"
-  if command -v curl >/dev/null; then curl -fsSL "$CHECKSUM_URL" -o "$SUMFILE"; else wget -qO "$SUMFILE" "$CHECKSUM_URL"; fi
-  EXPECTED="$(awk '{print $1}' "$SUMFILE")"
+# Optional: channel mode via signed manifest
+if [[ -n "$CHANNEL" ]]; then
+  MF_URL="${BASE_URL}/releases/manifest-${CHANNEL}.json"
+  MF_FILE="${WORKDIR}/manifest.json"
+  if command -v curl >/dev/null; then curl -fsSL "$MF_URL" -o "$MF_FILE"; else wget -qO "$MF_FILE" "$MF_URL"; fi
+  ver=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MF_FILE" | head -n1)
+  url=$(sed -n 's/.*"url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MF_FILE" | head -n1)
+  sha=$(sed -n 's/.*"sha256"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MF_FILE" | head -n1)
+  date_iso=$(sed -n 's/.*"date"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MF_FILE" | head -n1)
+  sig_b64=$(sed -n 's/.*"sig_b64"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$MF_FILE" | head -n1)
+  [[ -n "$url" && -n "$sha" ]] || { echo "invalid channel manifest" >&2; exit 3; }
+  # Download tarball
+  if command -v curl >/dev/null; then curl -fsSL "$url" -o "$TARBALL_PATH"; else wget -qO "$TARBALL_PATH" "$url"; fi
+  # Verify checksum
   ACTUAL="$( (sha256sum "$TARBALL_PATH" 2>/dev/null || shasum -a 256 "$TARBALL_PATH") | awk '{print $1}')"
-  [[ "$EXPECTED" == "$ACTUAL" ]] || { echo "checksum mismatch" >&2; exit 3; }
+  [[ "$sha" == "$ACTUAL" ]] || { echo "checksum mismatch" >&2; exit 3; }
+  # Optional signature verification
+  if [[ -n "$sig_b64" && -n "${SOLEN_SIGN_PUBKEY_PEM:-}" ]] && command -v openssl >/dev/null 2>&1; then
+    sig_file="${WORKDIR}/manifest.sig"; printf '%s' "$sig_b64" | base64 -d > "$sig_file" 2>/dev/null || true
+    data_str="${ver}|${sha}|${url}|${date_iso}|${CHANNEL}"
+    pub_file="${WORKDIR}/sign_pub.pem"; printf '%s' "$SOLEN_SIGN_PUBKEY_PEM" > "$pub_file"
+    if ! printf '%s' "$data_str" | openssl dgst -sha256 -verify "$pub_file" -signature "$sig_file" >/dev/null 2>&1; then
+      echo "manifest signature verification failed" >&2; exit 4
+    fi
+  elif [[ -n "$sig_b64" && "${SOLEN_REQUIRE_SIGNATURE:-0}" = "1" ]]; then
+    echo "signature required but cannot verify (missing pubkey or openssl)" >&2; exit 4
+  fi
+else
+  # Legacy direct URL mode (release or source)
+  if command -v curl >/dev/null; then curl -fsSL "$TARBALL_URL" -o "$TARBALL_PATH"; else wget -qO "$TARBALL_PATH" "$TARBALL_URL"; fi
+  if [[ $NO_VERIFY -eq 0 && -n "$CHECKSUM_URL" ]]; then
+    SUMFILE="${WORKDIR}/solen.sha256"
+    if command -v curl >/dev/null; then curl -fsSL "$CHECKSUM_URL" -o "$SUMFILE"; else wget -qO "$SUMFILE" "$CHECKSUM_URL"; fi
+    EXPECTED="$(awk '{print $1}' "$SUMFILE")"
+    ACTUAL="$( (sha256sum "$TARBALL_PATH" 2>/dev/null || shasum -a 256 "$TARBALL_PATH") | awk '{print $1}')"
+    [[ "$EXPECTED" == "$ACTUAL" ]] || { echo "checksum mismatch" >&2; exit 3; }
+  fi
 fi
 
-EXTRACT_DIR="${WORKDIR}/solen"; mkdir -p "$EXTRACT_DIR"; tar -xzf "$TARBALL_PATH" -C "$EXTRACT_DIR"
+EXTRACT_DIR="${WORKDIR}/solen"; mkdir -p "$EXTRACT_DIR"
+# Basic tarball safety: no absolute paths or parent traversals
+if tar -tzf "$TARBALL_PATH" | grep -Eq '^/|(^|/)[.]{2}(/|$)'; then
+  echo "tarball contains unsafe paths" >&2; exit 4
+fi
+tar -xzf "$TARBALL_PATH" -C "$EXTRACT_DIR"
 
 # locate repo root in tarball
 ROOT=""
@@ -151,6 +188,16 @@ pm_install_plan() { case "$__SOLEN_PM" in apt) echo "sudo apt-get install -y $*"
 pm_check_updates_count() { case "$__SOLEN_PM" in apt) (apt-get -s upgrade 2>/dev/null | awk '/^Inst /{c++} END{print c+0}') || echo 0 ;; dnf) (dnf -q check-update 2>/dev/null | awk 'END{print NR+0}') || echo 0 ;; pacman) (checkupdates 2>/dev/null | wc -l | tr -d ' ') || echo 0 ;; zypper) (zypper -q list-updates 2>/dev/null | awk 'NR>2{c++} END{print c+0}') || echo 0 ;; *) echo 0 ;; esac; }
 LIB
     chmod +x "$libdir/pm.sh" || true
+  fi
+  if [[ ! -f "$libdir/policy.sh" ]]; then
+    cat > "$libdir/policy.sh" <<'LIB'
+#!/usr/bin/env bash
+# Permissive policy stub (allow all) — replaced by real lib in releases
+solen_policy_allows_token() { return 0; }
+solen_policy_allows_service_restart() { return 0; }
+solen_policy_allows_prune_path() { return 0; }
+LIB
+    chmod +x "$libdir/policy.sh" || true
   fi
 }
 
