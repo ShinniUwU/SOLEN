@@ -39,30 +39,40 @@ CACHEFILE="${CACHEDIR}/update-cache.json"
 
 tmp="$(mktemp)"
 checked_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+host="$(hostname 2>/dev/null || uname -n)"
 if ! curl -fsSL --max-time 4 "$MAN_URL" -o "$tmp"; then
   [[ $QUIET -eq 1 ]] || echo "No update info (network)" >&2
-  printf '{"version":"","channel":"%s","checked_at":"%s"}\n' "$CHANNEL" "$checked_at" > "$CACHEFILE.tmp" || true
+  jq -n --arg inst "" --arg latest "" --arg ch "$CHANNEL" --arg ts "$checked_at" --arg host "$host" --arg sum "no update info (network)" \
+    '{installed_version:$inst, latest_version:$latest, channel:$ch, breaking:false, ts:$ts, host:$host, status:"warn", summary:$sum}' \
+    > "$CACHEFILE.tmp" || true
   mv "$CACHEFILE.tmp" "$CACHEFILE" 2>/dev/null || true
   rm -f "$tmp"
+  [[ $JSON -eq 1 ]] && cat "$CACHEFILE" || echo "cached latest ($CHANNEL): "
   exit 0
 fi
 
 # Validate minimal shape
 if ! jq -e '.version and .url and .sha256' "$tmp" >/dev/null 2>&1; then
   [[ $QUIET -eq 1 ]] || echo "Invalid manifest" >&2
-  printf '{"version":"","channel":"%s","checked_at":"%s"}\n' "$CHANNEL" "$checked_at" > "$CACHEFILE.tmp" || true
+  jq -n --arg inst "" --arg latest "" --arg ch "$CHANNEL" --arg ts "$checked_at" --arg host "$host" --arg sum "invalid manifest" \
+    '{installed_version:$inst, latest_version:$latest, channel:$ch, breaking:false, ts:$ts, host:$host, status:"warn", summary:$sum}' \
+    > "$CACHEFILE.tmp" || true
   mv "$CACHEFILE.tmp" "$CACHEFILE" 2>/dev/null || true
-  rm -f "$tmp"; exit 0
+  rm -f "$tmp"; [[ $JSON -eq 1 ]] && cat "$CACHEFILE" || echo "cached latest ($CHANNEL): "
+  exit 0
 fi
 
-jq --arg ch "$CHANNEL" --arg ts "$checked_at" \
-  '.channel=$ch | .checked_at=$ts' "$tmp" > "$CACHEFILE.tmp" && mv "$CACHEFILE.tmp" "$CACHEFILE"
+ver=$(jq -r '.version' "$tmp")
+brk=$(jq -r '.breaking // false' "$tmp")
+jq -n --arg inst "" --arg latest "$ver" --arg ch "$CHANNEL" --arg ts "$checked_at" --argjson breaking "$brk" --arg host "$host" \
+  --arg sum "cached latest ($CHANNEL): $ver" \
+  '{installed_version:$inst, latest_version:$latest, channel:$ch, breaking:$breaking, ts:$ts, host:$host, status:"ok", summary:$sum}' \
+  > "$CACHEFILE.tmp" && mv "$CACHEFILE.tmp" "$CACHEFILE"
 rm -f "$tmp"
 
 if [[ $JSON -eq 1 ]]; then
   cat "$CACHEFILE"
 else
-  ver="$(jq -r '.version' "$CACHEFILE")"
   echo "cached latest ($CHANNEL): $ver"
 fi
 exit 0

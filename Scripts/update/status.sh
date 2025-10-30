@@ -20,7 +20,6 @@ installed_ver=""
 if command -v serverutils >/dev/null 2>&1; then
   installed_ver="$(serverutils version 2>/dev/null || true)"
 fi
-# Fallback to repo-local runner if available
 if [[ -z "$installed_ver" ]]; then
   THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
@@ -28,27 +27,28 @@ if [[ -z "$installed_ver" ]]; then
     installed_ver="$("${ROOT_DIR}/serverutils" version 2>/dev/null || true)"
   fi
 fi
+# Keep full version string (no truncation of +buildmetadata)
 installed_ver="${installed_ver%% *}"
 CACHEFILE="${XDG_STATE_HOME:-$HOME/.local/state}/solen/update-cache.json"
-latest_ver=""; channel="stable"; checked_at=""
+latest_ver=""; channel="stable"; checked_at=""; breaking=false
 if [[ -f "$CACHEFILE" ]]; then
-  latest_ver="$(jq -r '.version // ""' "$CACHEFILE" 2>/dev/null || true)"
+  latest_ver="$(jq -r '.latest_version // .version // ""' "$CACHEFILE" 2>/dev/null || true)"
   channel="$(jq -r '.channel // "stable"' "$CACHEFILE" 2>/dev/null || true)"
-  checked_at="$(jq -r '.checked_at // ""' "$CACHEFILE" 2>/dev/null || true)"
+  checked_at="$(jq -r '.ts // .checked_at // ""' "$CACHEFILE" 2>/dev/null || true)"
+  breaking="$(jq -r '.breaking // false' "$CACHEFILE" 2>/dev/null || echo false)"
 fi
-
-cmp_semver() { # echo -1,0,1
-  awk -v A="$1" -v B="$2" 'BEGIN{n=split(A,a,".");m=split(B,b,"."); for(i=1;i<= (n>m?n:m); i++){aa=(i<=n?a[i]:0);bb=(i<=m?b[i]:0); if(aa+0<bb+0){print -1; exit} if(aa+0>bb+0){print 1; exit}} print 0}'
-}
 
 update_available=0
 if [[ -n "$latest_ver" && -n "$installed_ver" ]]; then
-  if [[ "$(cmp_semver "$installed_ver" "$latest_ver")" -lt 0 ]]; then update_available=1; fi
+  if [[ "$installed_ver" != "$latest_ver" ]]; then update_available=1; fi
 fi
 
+host="$(hostname 2>/dev/null || uname -n)"
 if [[ $JSON -eq 1 ]]; then
-  jq -n --arg inst "$installed_ver" --arg latest "$latest_ver" --arg ch "$channel" --arg ts "$checked_at" --argjson upd $update_available \
-    '{installed:$inst, latest:$latest, channel:$ch, checked_at:$ts, update_available:$upd}'
+  status="ok"; summary="solen up-to-date"
+  if [[ $update_available -eq 1 ]]; then summary="update available — ${installed_ver:-unknown} → ${latest_ver}"; fi
+  jq -n --arg inst "$installed_ver" --arg latest "$latest_ver" --arg ch "$channel" --arg ts "$checked_at" --arg host "$host" --arg sum "$summary" --argjson brk ${breaking:-false} \
+    --argjson upd $update_available '{installed_version:$inst, latest_version:$latest, channel:$ch, breaking:$brk, ts:$ts, host:$host, status:"ok", summary:$sum, update_available:$upd}'
 else
   if [[ $update_available -eq 1 ]]; then
     echo "· solen: update available — ${installed_ver:-unknown} → ${latest_ver} (run: serverutils update --apply)"

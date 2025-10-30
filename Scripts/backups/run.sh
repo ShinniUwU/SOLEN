@@ -106,14 +106,22 @@ ret_days="${ret_days:-7}"
 
 # Policy tokens (scaffold): backup-profile:<name>, backup-path:<dest>
 if ! solen_policy_allows_token "backup-profile:${profile}"; then
-  msg="policy refused: backup-profile:${profile}"
-  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
-  exit 4
+  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 || ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+    policy_denied_profile=1
+  else
+    msg="policy refused: backup-profile:${profile}"
+    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
+    exit 4
+  fi
 fi
 if ! solen_policy_allows_token "backup-path:${dest}"; then
-  msg="policy refused: backup-path:${dest}"
-  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
-  exit 4
+  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 || ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+    policy_denied_dest=1
+  else
+    msg="policy refused: backup-path:${dest}"
+    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
+    exit 4
+  fi
 fi
 
 # Enforce dry-run by default (safety); require --yes for real changes
@@ -281,9 +289,17 @@ if [[ "$cmd" == "run" ]]; then
     rollup="would back up ${#SRC_PATHS[@]} source(s) using $([[ $use_kopia -eq 1 ]] && echo kopia || echo scaffold), would prune ${prune_planned}"
     echo "would change $(( ${#SRC_PATHS[@]} + prune_planned + 1 )) items"
     if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
-      solen_json_record ok "$rollup" "$actions_list" "\"metrics\":{\"sources\":${#SRC_PATHS[@]},\"prune_planned\":${prune_planned}}"
+      if [[ ${policy_denied_profile:-0} -eq 1 || ${policy_denied_dest:-0} -eq 1 ]]; then
+        solen_json_record warn "policy would refuse backup (dry-run)" "$actions_list" "\"metrics\":{\"sources\":${#SRC_PATHS[@]},\"prune_planned\":${prune_planned}}"
+      else
+        solen_json_record ok "$rollup" "$actions_list" "\"metrics\":{\"sources\":${#SRC_PATHS[@]},\"prune_planned\":${prune_planned}}"
+      fi
     else
-      solen_ok "$rollup"
+      if [[ ${policy_denied_profile:-0} -eq 1 || ${policy_denied_dest:-0} -eq 1 ]]; then
+        solen_warn "policy would refuse backup (dry-run)"
+      else
+        solen_ok "$rollup"
+      fi
     fi
     exit 0
   else

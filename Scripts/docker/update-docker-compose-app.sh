@@ -87,12 +87,16 @@ fi
 
 # Policy: service restart requires allow for 'docker'
 if ! solen_policy_allows_service_restart "docker"; then
-  local_msg="policy denies restarting docker services"
-  solen_warn "$local_msg"
-  if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
-    solen_json_record error "$local_msg" "docker-compose pull\ndocker-compose up -d" "\"code\":4"
+  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 || ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+    policy_denied_docker=1
+  else
+    local_msg="policy denies restarting docker services"
+    solen_warn "$local_msg"
+    if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+      solen_json_record error "$local_msg" "docker-compose pull\ndocker-compose up -d" "\"code\":4"
+    fi
+    exit 4
   fi
-  exit 4
 fi
 
 # Build actions list
@@ -105,11 +109,19 @@ ACTIONS
 )
 
 if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
-  solen_info "dry-run: would execute"
+  if [[ ${policy_denied_docker:-0} -eq 1 ]]; then
+    solen_warn "policy would refuse docker restart (dry-run)"
+  else
+    solen_info "[dry-run] Would execute:"
+  fi
   printf '%s\n' "$actions"
   echo "would change 2 items"
   if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
-    solen_json_record ok "would update compose app at $TARGET_DIR" "$actions" "\"would_change\":2"
+    if [[ ${policy_denied_docker:-0} -eq 1 ]]; then
+      solen_json_record warn "policy would refuse docker restart (dry-run)" "$actions" "\"would_change\":0"
+    else
+      solen_json_record ok "would update compose app at $TARGET_DIR" "$actions" "\"would_change\":2"
+    fi
   fi
   exit 0
 fi

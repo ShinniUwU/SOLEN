@@ -79,9 +79,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! solen_policy_allows_token "firewall-apply"; then
-  msg="policy refused: firewall-apply"
-  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
-  exit 4
+  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 || ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+    # In dry-run, warn and continue to print a plan but do not fail hard
+    : # plan gets generated below; we will emit warn at the end if needed
+    policy_denied_dryrun=1
+  else
+    msg="policy refused: firewall-apply"
+    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
+    exit 4
+  fi
 fi
 
 # Normalize allow specs into proto and port
@@ -230,10 +236,18 @@ fi
 
 if [[ $SOLEN_FLAG_DRYRUN -eq 1 || $SOLEN_FLAG_YES -eq 0 ]]; then
   [[ $SOLEN_FLAG_JSON -eq 1 ]] && {
-    solen_json_record ok "dry-run: $summary" "$actions" "\"would_change\":1"
+    if [[ ${policy_denied_dryrun:-0} -eq 1 ]]; then
+      solen_json_record warn "policy would refuse: firewall-apply (dry-run)" "$actions" "\"would_change\":0"
+    else
+      solen_json_record ok "dry-run: $summary" "$actions" "\"would_change\":1"
+    fi
     exit 0
   }
-  solen_info "dry-run enforced (use --yes to apply)"
+  if [[ ${policy_denied_dryrun:-0} -eq 1 ]]; then
+    solen_warn "policy would refuse: firewall-apply (dry-run)"
+  else
+    solen_info "dry-run enforced (use --yes to apply)"
+  fi
   printf '%s' "$actions"
   exit 0
 fi

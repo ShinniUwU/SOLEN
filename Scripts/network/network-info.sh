@@ -84,6 +84,7 @@ if [[ -n "$gateway" ]]; then
 fi
 
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
+  any_ok=0
   # Interfaces
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -101,6 +102,7 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
 D
 )
     solen_json_record_full ok "$summary" "$details"
+    any_ok=$((any_ok+1))
   done < "$ifaces_tmp"
 
   # Ports (if available)
@@ -129,7 +131,12 @@ D
   metrics_kv="\"if_up\":${up_count},\"if_total\":${total_count},\"listening\":${ports_count},\"gateway_ok\":$([[ $gateway_ok == "true" ]] && echo true || echo false)"
   if [[ -n "$rtt_ms" ]]; then metrics_kv+=" ,\"rtt_ms\":${rtt_ms}"; fi
   solen_json_record ok "$rollup" "" "$metrics_kv"
-  exit 0
+  if [[ $any_ok -gt 0 ]]; then
+    exit 0
+  else
+    solen_json_record error "no interfaces enumerated" "" "\"code\":2"
+    exit 2
+  fi
 else
   solen_head "IP Addresses"
   cat "$ifaces_tmp"
@@ -139,7 +146,5 @@ else
   if [[ "$gateway_ok" == "true" ]]; then solen_ok "gateway reachable"; else solen_warn "gateway unreachable"; fi
   solen_ok "network information retrieval finished"
 fi
-
-exit 0
 
 exit 0

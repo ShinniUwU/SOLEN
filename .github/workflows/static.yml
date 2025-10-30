@@ -50,11 +50,19 @@ jobs:
           test -f Scripts/update/apply.sh
           test -f Scripts/update/status.sh
           # Determine version from serverutils (robust)
-          ver=$(awk -F '"' '/^VERSION=/ {print $2; exit}' serverutils)
-          if [ -z "${ver:-}" ]; then echo "VERSION not found in serverutils" >&2; exit 1; fi
+          base_ver=$(awk -F '"' '/^VERSION=/ {print $2; exit}' serverutils)
+          if [ -z "${base_ver:-}" ]; then echo "VERSION not found in serverutils" >&2; exit 1; fi
+          build_date=$(date -u +"%F")
+          short_sha=$(git rev-parse --short HEAD)
+          full_ver="${base_ver}+${build_date}.g${short_sha}"
+          echo "Computed full version: $full_ver"
+          # Stage build with VERSION baked in
+          rm -rf build && mkdir -p build
+          cp -a serverutils Scripts asset systemd config asciiart.ascii build/
+          sed -i "s/^VERSION=\".*\"/VERSION=\"${full_ver}\"/" build/serverutils
           # Build versioned tarball with runner + scripts and assets
-          ver_tar="site/releases/solen-${ver}.tar.gz"
-          tar -czf "$ver_tar" serverutils Scripts asset systemd config asciiart.ascii
+          ver_tar="site/releases/solen-${full_ver}.tar.gz"
+          tar -czf "$ver_tar" -C build .
           # Verify tarball contains required libs (avoid SIGPIPE under pipefail)
           tmp_tar_list=$(mktemp)
           tar -tf "$ver_tar" > "$tmp_tar_list"
@@ -69,7 +77,7 @@ jobs:
           cp -f "$ver_tar" site/releases/solen-nightly.tar.gz
           cp -f "$ver_tar" site/releases/solen-latest.tar.gz
           # Checksums for each published filename
-          (cd site/releases && sha256sum "solen-${ver}.tar.gz" > "solen-${ver}.tar.gz.sha256")
+          (cd site/releases && sha256sum "solen-${full_ver}.tar.gz" > "solen-${full_ver}.tar.gz.sha256")
           (cd site/releases && sha256sum solen-stable.tar.gz > solen-stable.tar.gz.sha256)
           (cd site/releases && sha256sum solen-rc.tar.gz > solen-rc.tar.gz.sha256)
           (cd site/releases && sha256sum solen-nightly.tar.gz > solen-nightly.tar.gz.sha256)
@@ -77,8 +85,11 @@ jobs:
       - name: Build channel manifests
         run: |
           set -euo pipefail
-          ver=$(awk -F '"' '/^VERSION=/ {print $2; exit}' serverutils)
-          test -n "$ver"
+          base_ver=$(awk -F '"' '/^VERSION=/ {print $2; exit}' serverutils)
+          test -n "$base_ver"
+          build_date=$(date -u +"%F")
+          short_sha=$(git rev-parse --short HEAD)
+          ver="${base_ver}+${build_date}.g${short_sha}"
           sha_stable=$(awk '{print $1}' site/releases/solen-stable.tar.gz.sha256)
           sha_rc=$(awk '{print $1}' site/releases/solen-rc.tar.gz.sha256)
           sha_nightly=$(awk '{print $1}' site/releases/solen-nightly.tar.gz.sha256)

@@ -115,9 +115,15 @@ if [ ${#TRUNCATE_LOGS[@]} -gt 0 ]; then
     if [ -f "$log_file" ]; then
       # Policy check per file
       if ! solen_policy_allows_prune_path "$log_file"; then
-        solen_warn "policy denies truncating: $log_file"
-        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "policy denies truncating $log_file" "truncate -s 0 $log_file" "\"code\":4"
-        exit 4
+        if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 || ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+          solen_warn "policy would deny truncating (dry-run): $log_file"
+          actions_list+="truncate -s 0 $log_file\n"
+          continue
+        else
+          solen_warn "policy denies truncating: $log_file"
+          [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "policy denies truncating $log_file" "truncate -s 0 $log_file" "\"code\":4"
+          exit 4
+        fi
       fi
       actions_list+="truncate -s 0 $log_file
 "

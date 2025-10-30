@@ -69,9 +69,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! solen_policy_allows_token "ssh-config-apply"; then
-  msg="policy refused: ssh-config-apply"
-  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
-  exit 4
+  if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 || ${SOLEN_FLAG_YES:-0} -eq 0 ]]; then
+    policy_denied_dryrun=1
+  else
+    msg="policy refused: ssh-config-apply"
+    [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":4" || solen_err "$msg"
+    exit 4
+  fi
 fi
 
 # Rollback: restore latest backup and exit
@@ -209,9 +213,17 @@ summary="sshd hardened (root=${permit_root}, passwords=${password_auth}${port:+,
 
 if [[ $SOLEN_FLAG_DRYRUN -eq 1 || $SOLEN_FLAG_YES -eq 0 ]]; then
   if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
-    solen_json_record ok "dry-run: $summary" "$actions" "\"would_change\":1"
+    if [[ ${policy_denied_dryrun:-0} -eq 1 ]]; then
+      solen_json_record warn "policy would refuse: ssh-config-apply (dry-run)" "$actions" "\"would_change\":0"
+    else
+      solen_json_record ok "dry-run: $summary" "$actions" "\"would_change\":1"
+    fi
   else
-    solen_info "dry-run enforced (use --yes to apply)"
+    if [[ ${policy_denied_dryrun:-0} -eq 1 ]]; then
+      solen_warn "policy would refuse: ssh-config-apply (dry-run)"
+    else
+      solen_info "dry-run enforced (use --yes to apply)"
+    fi
     printf '%s' "$actions"
   fi
   rm -f "$tmp" || true

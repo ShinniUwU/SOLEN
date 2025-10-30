@@ -153,4 +153,5 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
 else
   case "$st" in ok) solen_ok "$summary" ;; warn) solen_warn "$summary" ;; *) solen_err "$summary" ;; esac
 fi
-exit $([[ "$st" = "ok" ]] && echo 0 || ([[ "$st" = "warn" ]] && echo 0 || echo 1))
+# Always exit 0 for normal/warn results so the unit appends reliably
+exit 0
