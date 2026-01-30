@@ -2,41 +2,55 @@
 # SOLEN-META:
 # name: pkg/manage
 # summary: Unified package management (apt+dnf): check/update/upgrade/autoremove
+# requires: apt-get,dnf (any)
 # tags: packages,apt,dnf,updates
 # verbs: check,update,upgrade,autoremove
 # outputs: status,summary,metrics
 # root: false
 # since: 0.1.0
 # breaking: false
+
 set -Eeuo pipefail
 
-JSON=${SOLEN_JSON:-0}
-NOOP=${SOLEN_NOOP:-0}
-YES=${SOLEN_ASSUME_YES:-0}
+THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${THIS_DIR}/../lib/solen.sh"
+solen_init_flags
+
+usage() {
+  cat << EOF
+Usage: $(basename "$0") {check|update|upgrade|autoremove} [--dry-run] [--json] [--yes] [--manager apt|dnf]
+
+Commands:
+  check       Check for available updates
+  update      Update package lists (apt update / dnf makecache)
+  upgrade     Install available upgrades
+  autoremove  Remove unused dependencies
+
+Options:
+  --dry-run        Preview actions without executing
+  --json           Output JSON format
+  --yes            Execute changes (default is dry-run)
+  --manager <mgr>  Force package manager (apt or dnf), default auto-detect
+EOF
+}
+
 MANAGER="auto"
 CMD="${1:-}"
 shift || true
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
+  if solen_parse_common_flag "$1"; then shift; continue; fi
   case "$1" in
-    --json) JSON=1 ;;
-    --dry-run) NOOP=1 ;;
-    --yes) YES=1 ;;
-    --manager)
-      MANAGER="${2:-auto}"
-      shift
-      ;;
-    *) ;;
+    --manager) MANAGER="${2:-auto}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    *) shift ;;
   esac
-  shift || true
 done
 
-host() { hostname 2> /dev/null || uname -n; }
-ts() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
-j() { printf '%s\n' "$1"; }
-
 detect() {
-  [ "$MANAGER" != "auto" ] && echo "$MANAGER" && return
+  [[ "$MANAGER" != "auto" ]] && echo "$MANAGER" && return
   if command -v apt-get > /dev/null 2>&1; then
     echo apt
     return
@@ -49,7 +63,8 @@ detect() {
 }
 
 pkg_check_apt() {
-  if [ "$NOOP" = "1" ]; then
+  local out cnt sz reboot
+  if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
     sudo -n true > /dev/null 2>&1 || true
     out=$(apt-get -s upgrade 2> /dev/null || true)
   else
@@ -59,13 +74,13 @@ pkg_check_apt() {
   cnt=$(printf "%s\n" "$out" | awk '/^Inst /{c++} END{print c+0}')
   sz=$(printf "%s\n" "$out" | awk -F'[() ]+' '/^Inst /{for(i=1;i<=NF;i++) if($i=="size") s=$(i+1)} END{printf "%.0f", s+0}')
   reboot=0
-  [ -f /var/run/reboot-required ] && reboot=1
-  j "{\"status\":\"ok\",\"summary\":\"updates available: ${cnt}\",\"ts\":\"$(ts)\",\"host\":\"$(host)\",\"metrics\":{\"packages\":$cnt,\"size_kb\":$sz,\"reboot\":$reboot}}"
+  [[ -f /var/run/reboot-required ]] && reboot=1
+  solen_json_record ok "updates available: ${cnt}" "" "\"metrics\":{\"packages\":$cnt,\"size_kb\":$sz,\"reboot\":$([[ $reboot -eq 1 ]] && echo true || echo false)}"
 }
 
 pkg_check_dnf() {
-  # dnf check-update returns 100 when updates available; parse list count
-  if [ "$NOOP" = "1" ]; then
+  local out cnt reboot
+  if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
     out=$(dnf -q check-update || true)
   else
     dnf -q makecache > /dev/null 2>&1 || true
@@ -73,33 +88,38 @@ pkg_check_dnf() {
   fi
   cnt=$(printf "%s\n" "$out" | awk '/^\S+\.\S+\s+\S+\s+\S+$/ {c++} END{print c+0}')
   reboot=0
-  command -v needs-restarting > /dev/null 2>&1 && needs-restarting -r > /dev/null 2>&1 || reboot=$?
-  [ "$reboot" -ne 0 ] && reboot=1
-  j "{\"status\":\"ok\",\"summary\":\"updates available: ${cnt}\",\"ts\":\"$(ts)\",\"host\":\"$(host)\",\"metrics\":{\"packages\":$cnt,\"reboot\":$reboot}}"
+  if command -v needs-restarting > /dev/null 2>&1; then
+    needs-restarting -r > /dev/null 2>&1 || reboot=$?
+    [[ "$reboot" -ne 0 ]] && reboot=1
+  fi
+  solen_json_record ok "updates available: ${cnt}" "" "\"metrics\":{\"packages\":$cnt,\"reboot\":$([[ $reboot -eq 1 ]] && echo true || echo false)}"
 }
 
 pkg_run_apt() {
   local verb="$1"
   case "$verb" in
     update)
-      if [ "$NOOP" = "1" ]; then
-        j "{\"status\":\"ok\",\"summary\":\"would run: apt-get update\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+      if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "would run: apt-get update" "apt-get update" "\"would_change\":1" || solen_info "[dry-run] would run: apt-get update"
       else
-        sudo apt-get update && j "{\"status\":\"ok\",\"summary\":\"apt-get update complete\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+        sudo apt-get update
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "apt-get update complete" "apt-get update" "\"changed\":1" || solen_ok "apt-get update complete"
       fi
       ;;
     upgrade)
-      if [ "$NOOP" = "1" ]; then
-        j "{\"status\":\"ok\",\"summary\":\"would run: apt-get -y upgrade\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+      if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "would run: apt-get -y upgrade" "apt-get -y upgrade" "\"would_change\":1" || solen_info "[dry-run] would run: apt-get -y upgrade"
       else
-        sudo apt-get -y upgrade && j "{\"status\":\"ok\",\"summary\":\"apt-get upgrade complete\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+        sudo apt-get -y upgrade
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "apt-get upgrade complete" "apt-get -y upgrade" "\"changed\":1" || solen_ok "apt-get upgrade complete"
       fi
       ;;
     autoremove)
-      if [ "$NOOP" = "1" ]; then
-        j "{\"status\":\"ok\",\"summary\":\"would run: apt-get -y autoremove\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+      if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "would run: apt-get -y autoremove" "apt-get -y autoremove" "\"would_change\":1" || solen_info "[dry-run] would run: apt-get -y autoremove"
       else
-        sudo apt-get -y autoremove && j "{\"status\":\"ok\",\"summary\":\"apt-get autoremove complete\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+        sudo apt-get -y autoremove
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "apt-get autoremove complete" "apt-get -y autoremove" "\"changed\":1" || solen_ok "apt-get autoremove complete"
       fi
       ;;
   esac
@@ -109,44 +129,53 @@ pkg_run_dnf() {
   local verb="$1"
   case "$verb" in
     update)
-      if [ "$NOOP" = "1" ]; then
-        j "{\"status\":\"ok\",\"summary\":\"would run: dnf makecache\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+      if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "would run: dnf makecache" "dnf makecache" "\"would_change\":1" || solen_info "[dry-run] would run: dnf makecache"
       else
-        sudo dnf -y makecache && j "{\"status\":\"ok\",\"summary\":\"dnf makecache complete\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+        sudo dnf -y makecache
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "dnf makecache complete" "dnf makecache" "\"changed\":1" || solen_ok "dnf makecache complete"
       fi
       ;;
     upgrade)
-      if [ "$NOOP" = "1" ]; then
-        j "{\"status\":\"ok\",\"summary\":\"would run: dnf -y upgrade\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+      if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "would run: dnf -y upgrade" "dnf -y upgrade" "\"would_change\":1" || solen_info "[dry-run] would run: dnf -y upgrade"
       else
-        sudo dnf -y upgrade && j "{\"status\":\"ok\",\"summary\":\"dnf upgrade complete\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+        sudo dnf -y upgrade
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "dnf upgrade complete" "dnf -y upgrade" "\"changed\":1" || solen_ok "dnf upgrade complete"
       fi
       ;;
     autoremove)
-      if [ "$NOOP" = "1" ]; then
-        j "{\"status\":\"ok\",\"summary\":\"would run: dnf -y autoremove\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+      if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "would run: dnf -y autoremove" "dnf -y autoremove" "\"would_change\":1" || solen_info "[dry-run] would run: dnf -y autoremove"
       else
-        sudo dnf -y autoremove && j "{\"status\":\"ok\",\"summary\":\"dnf autoremove complete\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+        sudo dnf -y autoremove
+        [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "dnf autoremove complete" "dnf -y autoremove" "\"changed\":1" || solen_ok "dnf autoremove complete"
       fi
       ;;
   esac
 }
 
 mgr=$(detect)
-[ "$mgr" = "none" ] && {
-  j "{\"status\":\"error\",\"summary\":\"no package manager (apt/dnf) found\",\"ts\":\"$(ts)\",\"host\":\"$(host)\"}"
+if [[ "$mgr" == "none" ]]; then
+  msg="no package manager (apt/dnf) found"
+  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "$msg" "" "\"code\":2" || solen_err "$msg"
   exit 2
-}
+fi
 
 case "$CMD" in
   check)
-    [ "$mgr" = "apt" ] && pkg_check_apt || pkg_check_dnf
+    [[ "$mgr" == "apt" ]] && pkg_check_apt || pkg_check_dnf
     ;;
-  update | upgrade | autoremove)
-    [ "$mgr" = "apt" ] && pkg_run_apt "$CMD" || pkg_run_dnf "$CMD"
+  update|upgrade|autoremove)
+    [[ "$mgr" == "apt" ]] && pkg_run_apt "$CMD" || pkg_run_dnf "$CMD"
+    ;;
+  "")
+    usage
+    exit 1
     ;;
   *)
-    echo "Usage: $0 {check|update|upgrade|autoremove} [--dry-run] [--json] [--manager apt|dnf]" >&2
+    solen_err "unknown command: $CMD"
+    usage >&2
     exit 1
     ;;
 esac

@@ -1,33 +1,106 @@
-# SOLEN Backups profiles (scaffold)
+# ============================================================================
+# SOLEN Backups Configuration
+# ============================================================================
+#
+# This file defines backup profiles for the SOLEN backup system (Kopia-backed).
+#
+# Usage:
+#   serverutils run backups/run -- run --profile <name> [--yes]
+#   serverutils run backups/run -- prune --profile <name> [--yes]
+#
+# Profiles are executed via Kopia. Ensure Kopia is installed:
+#   serverutils run backups/install-kopia -- --yes
+#
+# ============================================================================
 
+# Default settings applied to all profiles unless overridden
 defaults:
+  # Destination directory for backups
   dest: /var/backups/solen
+
+  # Days to keep backups before pruning (used with --prune)
   retention_days: 7
+
+  # Global exclusion patterns (applied to all profiles)
+  # Uses gitignore-style patterns
   exclude:
-    - "*.cache/**"
+    - "*.cache/**"      # Skip cache directories
+    - "*.log"           # Skip log files
+    - "*.tmp"           # Skip temp files
+    - "node_modules/**" # Skip npm dependencies
+
+# ============================================================================
+# Backup Profiles
+# ============================================================================
+#
+# Each profile defines:
+#   - name: Unique identifier (used with --profile flag)
+#   - tags: Labels for filtering/grouping
+#   - sources: List of paths to back up
+#     - path: Directory or file to include
+#     - exclude: Per-source exclusion patterns (optional)
+#
+# ============================================================================
 
 profiles:
+  # -------------------------------------------------------------------------
+  # System Configuration
+  # -------------------------------------------------------------------------
   - name: etc
-    tags: [etc]
+    tags: [system, etc, config]
     sources:
       - path: /etc
-        exclude: ["ssl/certs/*.pem"]
+        exclude:
+          - "ssl/certs/*.pem"    # Skip CA certificates (can be regenerated)
+          - "ssh/ssh_host_*"     # Skip host keys (security sensitive)
+          - "shadow"             # Skip password file
+          - "gshadow"            # Skip group password file
+
+  # -------------------------------------------------------------------------
+  # Proxmox/LXC Configuration
+  # -------------------------------------------------------------------------
   - name: lxc-configs
-    tags: [lxc]
+    tags: [proxmox, lxc, virtualization]
     sources:
-      - path: /etc/pve/lxc
-      - path: /etc/pve/storage.cfg
-      - path: /etc/subuid
-      - path: /etc/subgid
+      - path: /etc/pve/lxc          # LXC container configs
+      - path: /etc/pve/storage.cfg  # Storage configuration
+      - path: /etc/subuid           # UID mapping
+      - path: /etc/subgid           # GID mapping
+
+  # -------------------------------------------------------------------------
+  # Application: Jellyfin
+  # -------------------------------------------------------------------------
   - name: jellyfin-meta
-    tags: [media,jellyfin]
+    tags: [media, jellyfin, application]
     sources:
       - path: /var/lib/jellyfin
-        exclude: ["transcodes/**"]
-  - name: mc-world
-    tags: [mc]
-    sources:
-      - path: /opt/mc_forge_1_20_1/world
-      - path: /opt/mc_forge_1_20_1/server.properties
-      - path: /opt/mc_forge_1_20_1/mods
+        exclude:
+          - "transcodes/**"   # Skip transcoding cache (large, regenerable)
+          - "cache/**"        # Skip cache directories
+          - "log/**"          # Skip logs
 
+  # -------------------------------------------------------------------------
+  # Application: Minecraft Server
+  # -------------------------------------------------------------------------
+  - name: mc-world
+    tags: [gaming, minecraft]
+    sources:
+      - path: /opt/mc_forge_1_20_1/world           # World data
+      - path: /opt/mc_forge_1_20_1/server.properties
+      - path: /opt/mc_forge_1_20_1/mods            # Installed mods
+
+# ============================================================================
+# Example: Adding Your Own Profile
+# ============================================================================
+#
+#  - name: my-webapp
+#    tags: [web, production]
+#    sources:
+#      - path: /var/www/myapp
+#        exclude:
+#          - "node_modules/**"
+#          - "vendor/**"
+#          - ".git/**"
+#      - path: /etc/nginx/sites-available/myapp
+#
+# ============================================================================

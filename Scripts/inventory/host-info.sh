@@ -125,7 +125,3 @@ else
   solen_ok "inventory complete"
 fi
 exit 0
-if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]]; then
-  # Emit an initial JSON record so validators see JSON immediately
-  solen_json_record ok "begin: inventory" "" ""
-fi

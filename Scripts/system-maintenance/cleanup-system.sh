@@ -60,9 +60,8 @@ if [[ ${SOLEN_FLAG_DRYRUN:-0} -eq 1 ]]; then
   printf '%s\n' "$actions"
   echo "would change 3 items"
   if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]]; then
-    printf '%s\n' "$actions" | sed '/^$/d' >"/tmp/._su_actions.$$" || true
-    solen_json_record ok "would clean apt caches and unused packages" "$(cat /tmp/._su_actions.$$ 2>/dev/null || true)" "\"would_change\":3"
-    rm -f "/tmp/._su_actions.$$" || true
+    actions_clean=$(printf '%s\n' "$actions" | sed '/^$/d')
+    solen_json_record ok "would clean apt caches and unused packages" "$actions_clean" "\"would_change\":3"
   fi
   exit 0
 fi

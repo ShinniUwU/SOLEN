@@ -30,24 +30,18 @@ kind="none"; enabled=false; details=""
 if command -v ufw >/dev/null 2>&1; then
   kind="ufw"
   out=$(ufw status verbose 2>/dev/null || true)
-  echo "$out" >/tmp/solen.ufw.$$ || true
-  grep -qi '^status: active' /tmp/solen.ufw.$$ && enabled=true || enabled=false
+  grep -qi '^status: active' <<< "$out" && enabled=true || enabled=false
   details="$out"
-  rm -f /tmp/solen.ufw.$$ || true
 elif command -v nft >/dev/null 2>&1; then
   kind="nftables"
   out=$(nft list ruleset 2>/dev/null || true)
-  echo "$out" >/tmp/solen.nft.$$ || true
-  grep -q 'table' /tmp/solen.nft.$$ && enabled=true || enabled=false
+  grep -q 'table' <<< "$out" && enabled=true || enabled=false
   details="$out"
-  rm -f /tmp/solen.nft.$$ || true
 elif command -v iptables >/dev/null 2>&1; then
   kind="iptables"
   out=$(iptables -S 2>/dev/null || true)
-  echo "$out" >/tmp/solen.ipt.$$ || true
-  grep -q '^-P' /tmp/solen.ipt.$$ && enabled=true || enabled=false
+  grep -q '^-P' <<< "$out" && enabled=true || enabled=false
   details="$out"
-  rm -f /tmp/solen.ipt.$$ || true
 fi
 
 summary="${kind} $( $enabled && echo enabled || echo disabled)"

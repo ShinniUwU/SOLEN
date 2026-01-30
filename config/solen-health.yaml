@@ -1,19 +1,85 @@
-# SOLEN Health thresholds (scaffold)
+# ============================================================================
+# SOLEN Health Check Configuration
+# ============================================================================
+#
+# This file defines thresholds for the health/check.sh script.
+# Values trigger warn/error status in JSON output based on system metrics.
+#
+# Usage:
+#   serverutils run health/check -- --json
+#
 # Parser behavior:
-#  - If 'yq' is installed, thresholds are read via yq (supports standard YAML).
-#  - If 'yq' is not present, a lightweight awk fallback supports the inline
-#    shapes used below (flat threshold keys and inline service allow list).
+#   - If 'yq' is installed, thresholds are read via yq (supports full YAML)
+#   - If 'yq' is not present, a lightweight awk fallback supports the
+#     simplified inline format shown below
+#
+# ============================================================================
+
+# Threshold definitions
+# Each threshold has two levels:
+#   - warn: Value that triggers warning status (yellow)
+#   - error: Value that triggers error status (red)
 
 thresholds:
+  # -------------------------------------------------------------------------
+  # Disk Usage (root partition)
+  # -------------------------------------------------------------------------
+  # Percentage of root (/) partition used
+  # High disk usage can cause system instability and failed writes
   disk_root_pct:
-    warn: 85
-    error: 95
+    warn: 85    # Warn when root disk exceeds 85% usage
+    error: 95   # Error when root disk exceeds 95% usage
+
+  # -------------------------------------------------------------------------
+  # CPU Load Average
+  # -------------------------------------------------------------------------
+  # 15-minute load average divided by number of CPU cores
+  # Values > 1.0 indicate the system is overloaded
+  # Example: 4-core system with load 4.0 = 1.0 per core (at capacity)
   load15_per_core:
-    warn: 1.0
-    error: 2.0
+    warn: 1.0   # Warn when load per core exceeds 1.0
+    error: 2.0  # Error when load per core exceeds 2.0
+
+  # -------------------------------------------------------------------------
+  # Memory Pressure
+  # -------------------------------------------------------------------------
+  # Percentage of total memory in use (excluding buffers/cache)
+  # High memory pressure can trigger OOM killer
   mem_pressure_pct:
-    warn: 70
-    error: 85
+    warn: 70    # Warn when memory usage exceeds 70%
+    error: 85   # Error when memory usage exceeds 85%
+
+# ============================================================================
+# Service Monitoring
+# ============================================================================
+#
+# Services to check status for. Only checked if:
+#   1. systemd is present
+#   2. The service unit exists
+#
+# Inline list format supported by awk fallback parser
+# Multiline lists are supported when yq is available
+
 services:
-  # Inline list supported by awk fallback; multiline lists are supported when yq is available
-  allow: ["sshd", "cron", "docker", "jellyfin"]
+  # Services that should be running for healthy system state
+  allow: ["sshd", "cron", "docker"]
+
+# ============================================================================
+# Example: Extended Configuration (requires yq)
+# ============================================================================
+#
+# services:
+#   allow:
+#     - sshd
+#     - cron
+#     - docker
+#     - nginx
+#     - postgresql
+#   critical:
+#     - sshd      # SSH must always be running
+#
+# docker:
+#   unhealthy_threshold: 0   # Error if any container is unhealthy
+#   stopped_warn: true       # Warn about stopped containers
+#
+# ============================================================================

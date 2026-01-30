@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "solen-host-info",
+  "title": "SOLEN Host Info Output",
+  "description": "Schema for inventory/host-info.sh --json output",
+  "type": "object",
+  "required": ["status", "summary", "ts", "host", "metrics", "details"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ok", "warn", "error"],
+      "description": "Overall status of the inventory collection"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Human-readable summary of host info"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp"
+    },
+    "host": {
+      "type": "string",
+      "description": "Hostname of the system"
+    },
+    "actions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "List of actions taken (empty for read-only)"
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["cores", "mem_total_mi", "mem_used_mi", "disk_root_used_pct"],
+      "properties": {
+        "cores": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of CPU cores"
+        },
+        "mem_total_mi": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total memory in MiB"
+        },
+        "mem_used_mi": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Used memory in MiB"
+        },
+        "disk_root_used_pct": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Root partition usage percentage"
+        },
+        "disks": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of block devices"
+        },
+        "mounts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of mount points"
+        },
+        "containers_total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total Docker containers"
+        },
+        "containers_running": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Running Docker containers"
+        },
+        "containers_unhealthy": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Unhealthy Docker containers"
+        }
+      }
+    },
+    "details": {
+      "type": "object",
+      "required": ["os", "kernel", "uptime", "network", "services"],
+      "properties": {
+        "os": {
+          "type": "string",
+          "description": "Operating system name and version"
+        },
+        "kernel": {
+          "type": "string",
+          "description": "Linux kernel version"
+        },
+        "uptime": {
+          "type": "string",
+          "description": "System uptime in human-readable format"
+        },
+        "network": {
+          "type": "object",
+          "properties": {
+            "default_iface": { "type": "string" },
+            "gateway": { "type": "string" },
+            "ipv4": { "type": "string" },
+            "ipv6": { "type": "string" }
+          }
+        },
+        "services": {
+          "type": "object",
+          "properties": {
+            "sshd": { "type": "string" },
+            "cron": { "type": "string" },
+            "docker": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

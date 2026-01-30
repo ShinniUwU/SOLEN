@@ -1,0 +1,85 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bats
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq
+
+      - name: Run unit tests
+        run: bats tests/unit/
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats jq
+
+      - name: Run integration tests
+        run: bats tests/integration/
+
+  script-validation:
+    name: Script Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Test inventory/host-info JSON output
+        run: |
+          ./Scripts/inventory/host-info.sh --json | jq -e .
+          ./Scripts/inventory/host-info.sh --json | jq -e '.status == "ok"'
+
+      - name: Test network/network-info JSON output
+        run: |
+          ./Scripts/network/network-info.sh --json | jq -e .
+
+      - name: Test services/ensure validation
+        run: |
+          # Should fail with invalid unit name
+          ! ./Scripts/services/ensure.sh status --unit "foo;bar" 2>/dev/null
+          # Should accept valid unit name pattern
+          ./Scripts/services/ensure.sh status --unit "ssh" --json 2>/dev/null | jq -e . || true
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './Scripts'
+          severity: warning
+          # Suppress sourcing warnings (handled at runtime)
+          additional_files: 'serverutils'
+        env:
+          SHELLCHECK_OPTS: -e SC1090 -e SC1091

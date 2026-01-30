@@ -129,7 +129,7 @@ D
   total_count=$(wc -l < "$ifaces_tmp")
   rollup="interfaces: ${up_count} up / ${total_count} total; default route via ${gateway:-unknown}; listening ports: ${ports_count}; connectivity: gateway $([[ $gateway_ok == "true" ]] && echo OK || echo FAIL)"
   metrics_kv="\"if_up\":${up_count},\"if_total\":${total_count},\"listening\":${ports_count},\"gateway_ok\":$([[ $gateway_ok == "true" ]] && echo true || echo false)"
-  if [[ -n "$rtt_ms" ]]; then metrics_kv+=" ,\"rtt_ms\":${rtt_ms}"; fi
+  if [[ -n "$rtt_ms" ]]; then metrics_kv+=",\"rtt_ms\":${rtt_ms}"; fi
   solen_json_record ok "$rollup" "" "$metrics_kv"
   if [[ $any_ok -gt 0 ]]; then
     exit 0

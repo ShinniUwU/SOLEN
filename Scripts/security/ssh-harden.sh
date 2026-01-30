@@ -122,7 +122,8 @@ conf="/etc/ssh/sshd_config"
 [[ -r "$conf" ]] || { solen_err "not readable: $conf"; [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "missing sshd_config" "" "\"code\":2"; exit 2; }
 
 ts="$(date -u +%Y%m%d-%H%M%S)"
-tmp="/tmp/solen.sshd_config.${ts}.$$.tmp"
+tmp="$(mktemp -t solen.sshd_config.XXXXXX)"
+trap 'rm -f "$tmp"' EXIT INT TERM
 backup="/etc/ssh/sshd_config.${ts}.bak"
 
 # Prepare desired directives
