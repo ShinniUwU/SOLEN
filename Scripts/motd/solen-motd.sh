@@ -94,6 +94,13 @@ read_banner() {
   fi
   [ -z "$version" ] && version="dev"
 
+  # Clean up version: "0.1.0+2026-01-30.gd29f509" → "0.1.0 (d29f509)"
+  if [[ "$version" == *"+"* ]]; then
+    local base="${version%%+*}"
+    local hash="${version##*.g}"
+    version="$base ($hash)"
+  fi
+
   # Try CWD, then repo root alongside serverutils
   local banner_file=""
   if [ -f "asciiart.ascii" ]; then
