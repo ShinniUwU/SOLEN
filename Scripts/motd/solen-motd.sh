@@ -85,15 +85,25 @@ center() {
 }
 
 read_banner() {
-  # Try CWD, then repo root alongside serverutils
-  if [ -f "asciiart.ascii" ]; then
-    cat asciiart.ascii | trim80
-    return 0
-  fi
+  # Get version from serverutils
+  local version=""
   local root
   root="$(cd "${THIS_DIR}/../.." 2>/dev/null && pwd)"
-  if [ -n "$root" ] && [ -f "$root/asciiart.ascii" ]; then
-    cat "$root/asciiart.ascii" | trim80
+  if [ -n "$root" ] && [ -x "$root/serverutils" ]; then
+    version=$("$root/serverutils" version 2>/dev/null | awk '{print $1}')
+  fi
+  [ -z "$version" ] && version="dev"
+
+  # Try CWD, then repo root alongside serverutils
+  local banner_file=""
+  if [ -f "asciiart.ascii" ]; then
+    banner_file="asciiart.ascii"
+  elif [ -n "$root" ] && [ -f "$root/asciiart.ascii" ]; then
+    banner_file="$root/asciiart.ascii"
+  fi
+
+  if [ -n "$banner_file" ]; then
+    sed "s/{{VERSION}}/$version/" "$banner_file" | trim80
   fi
 }
 

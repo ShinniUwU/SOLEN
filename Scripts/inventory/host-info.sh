@@ -74,7 +74,7 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker_present=1
   containers_total=$(docker ps -a -q 2>/dev/null | wc -l | awk '{print $1+0}')
   containers_running=$(docker ps -q 2>/dev/null | wc -l | awk '{print $1+0}')
-  containers_unhealthy=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -i '\(unhealthy\)' | wc -l | awk '{print $1+0}')
+  containers_unhealthy=$(docker ps --format '{{.Status}}' 2>/dev/null | { grep -i '\(unhealthy\)' || true; } | wc -l | awk '{print $1+0}')
 fi
 
 # Services (systemd)
@@ -91,23 +91,8 @@ summary="${oss}; ${cores}c/${mem_total_m}Mi; disks ${disks_count}, mounts ${moun
 
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
   metrics_kv="\"metrics\":{\"cores\":${cores},\"mem_total_mi\":${mem_total_m},\"mem_used_mi\":${mem_used_m},\"disk_root_used_pct\":${disk_root_pct},\"disks\":${disks_count},\"mounts\":${mounts_count},\"containers_total\":${containers_total},\"containers_running\":${containers_running},\"containers_unhealthy\":${containers_unhealthy}}"
-  details=$(cat <<D
-"details":{
-  "os":"$(printf '%s' "$oss" | sed 's/\\/\\\\/g; s/"/\\"/g')",
-  "kernel":"$kern",
-  "uptime":"$up",
-  "network":{
-    "default_iface":"${default_iface:-}",
-    "gateway":"${gateway:-}",
-    "ipv4":"${ip4:-}",
-    "ipv6":"${ip6:-}"
-  },
-  "services":{
-    "sshd":"$svc_sshd","cron":"$svc_cron","docker":"$svc_docker"
-  }
-}
-D
-)
+  oss_esc=$(printf '%s' "$oss" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  details="\"details\":{\"os\":\"${oss_esc}\",\"kernel\":\"${kern}\",\"uptime\":\"${up}\",\"network\":{\"default_iface\":\"${default_iface:-}\",\"gateway\":\"${gateway:-}\",\"ipv4\":\"${ip4:-}\",\"ipv6\":\"${ip6:-}\"},\"services\":{\"sshd\":\"${svc_sshd}\",\"cron\":\"${svc_cron}\",\"docker\":\"${svc_docker}\"}}"
   solen_json_record ok "$summary" "" "${metrics_kv},${details}"
 else
   solen_head "Host"

@@ -58,9 +58,9 @@ ${actions_text}
 EOF
     actions_json+="]"
   fi
-  printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","actions":%s%s}%s' \
+  printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","actions":%s%s}\n' \
     "$(_esc "$status")" "$(_esc "$summary")" "$(solen_ts)" "$(_esc "$host")" "$actions_json" \
-    "${extra:+,${extra}}" "\n"
+    "${extra:+,${extra}}"
 }
 
 # Convenience: emit a JSON record with a ready-made details fragment
