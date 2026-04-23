@@ -256,7 +256,7 @@ if [[ $do_restart -eq 1 ]]; then
   fi
 fi
 
-metrics=\"\\"restarted\\\":$([[ $did_restart -eq 1 ]] && echo true || echo false)\"
+metrics="\"restarted\":$([[ $did_restart -eq 1 ]] && echo true || echo false)"
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
   solen_json_record ok "$summary" "sudo edit sshd_config; test; ${do_restart:+restart}" "{${metrics}}"
 else

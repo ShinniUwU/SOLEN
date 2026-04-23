@@ -221,6 +221,7 @@ elif [[ "$chosen" == "iptables" ]]; then
   fi
   actions+=$'# NOTE: default INPUT policy remains unchanged to avoid lockouts.\n'
 fi
+fi
 
 summary="firewall apply via ${chosen}; ssh ${ssh_port}; allows=${#norm_allows[@]}"
 

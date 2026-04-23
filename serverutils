@@ -276,7 +276,11 @@ cmd_home() {
   if { [[ -t 1 ]] || [[ "${FORCE_TUI:-0}" == "1" ]]; } && [[ "${SOLEN_NO_TUI:-0}" != "1" ]]; then
     while true; do
       command -v clear >/dev/null 2>&1 && clear || true
-      [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && { cat "${ROOT_DIR}/asciiart.ascii"; echo; }
+      [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && { sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"; echo; }
+      local _motd_rc
+      case "${SHELL##*/}" in zsh) _motd_rc="$HOME/.zshrc" ;; fish) _motd_rc="$HOME/.config/fish/config.fish" ;; *) _motd_rc="$HOME/.bashrc" ;; esac
+      local _motd_configured=0
+      { grep -q 'solen-motd' "$_motd_rc" 2>/dev/null || grep -q 'solen-motd' /etc/profile.d/solen-motd.sh 2>/dev/null || [[ -f /etc/update-motd.d/90-solen ]]; } && _motd_configured=1
       echo "SOLEN Runner — choose an action:"
       echo "  1) List scripts (then run)"
       echo "  2) Search scripts (then run)"
@@ -284,7 +288,7 @@ cmd_home() {
       echo "  4) Apt update/upgrade (dry-run)"
       echo "  5) Install runner (user)"
       echo "  6) Overview"
-      echo "  7) Setup MOTD (print snippet)"
+      [[ $_motd_configured -eq 0 ]] && echo "  7) Setup MOTD (print snippet)"
       echo "  r) Run a script by key/name"
       echo "  q) Quit"
       printf "> "
@@ -821,7 +825,7 @@ cmd_doctor() {
 show_help() {
   # Print ASCII banner if present
   if [[ -f "${ROOT_DIR}/asciiart.ascii" ]]; then
-    cat "${ROOT_DIR}/asciiart.ascii"
+    sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"
     echo
   fi
   cat <<'EOF'
@@ -1048,7 +1052,7 @@ main() {
       ;;
     banner)
       if [[ -f "${ROOT_DIR}/asciiart.ascii" ]]; then
-        cat "${ROOT_DIR}/asciiart.ascii"
+        sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"
         echo
       else
         echowarn "asciiart.ascii not found in ${ROOT_DIR}"

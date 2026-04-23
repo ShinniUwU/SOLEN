@@ -101,7 +101,7 @@ disk_root_pct=$(df -P -BG / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5+0
 services_allow=()
 if [[ -r "$HEALTH_CFG" ]]; then
   # supports YAML inline list: services: allow: ["sshd", "cron"]
-  inline=$(awk '/services:/,0{ if($0 ~ /allow:/){ print; exit } }' "$HEALTH_CFG" | awk -F'\[' '{print $2}' | awk -F']' '{print $1}')
+  inline=$(awk '/services:/,0{ if($0 ~ /allow:/){ print; exit } }' "$HEALTH_CFG" | awk -F'[' '{print $2}' | awk -F']' '{print $1}')
   if [[ -n "$inline" ]]; then
     # split by comma
     IFS=',' read -r -a services_allow <<< "${inline}"
@@ -124,7 +124,7 @@ fi
 
 unhealthy_containers=0
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  unhealthy_containers=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -i '\(unhealthy\)' | wc -l | awk '{print $1+0}')
+  unhealthy_containers=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -ic '(unhealthy)' || echo 0)
 fi
 
 # thresholds
