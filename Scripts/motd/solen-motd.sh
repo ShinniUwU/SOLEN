@@ -191,18 +191,18 @@ bar() {
   # Fancy unicode bar with color (if not plain)
   local pct="$1" width="${2:-22}"
   [ -z "$pct" ] && pct=0
-  local fill=$(awk -v p="$pct" -v w="$width" "BEGIN{ if(p<0)p=0; if(p>100)p=100; printf \"%d\", int(p*w/100+0.5) }")
+  local fill
+  fill=$(awk -v p="$pct" -v w="$width" "BEGIN{ if(p<0)p=0; if(p>100)p=100; printf \"%d\", int(p*w/100+0.5) }")
   [ "$fill" -gt "$width" ] && fill="$width"
   local filled_char unf_char
   if [ "$PLAIN" != "1" ]; then filled_char="█"; unf_char="░"; else filled_char="#"; unf_char="-"; fi
-  local i
   local col
   col=$(color_for_pct "$pct")
   printf "["
   if [ "$PLAIN" != "1" ]; then printf "%s" "$col"; fi
-  for i in $(seq 1 "$fill"); do printf "%s" "$filled_char"; done
+  for _ in $(seq 1 "$fill"); do printf "%s" "$filled_char"; done
   if [ "$PLAIN" != "1" ]; then printf "%s" "$C_RESET"; fi
-  for i in $(seq $((fill + 1)) "$width"); do printf "%s" "$unf_char"; done
+  for _ in $(seq $((fill + 1)) "$width"); do printf "%s" "$unf_char"; done
   printf "]"
 }
 
@@ -230,15 +230,13 @@ print_human() {
   host="$(_host)"; os="$(_os)"; kernel="$(_kernel)"; up="$(_uptime)"
   local cpu loads l1 l5 l15 cores
   cpu="$(_cpu)"; l1=$(awk '{print $1}' <<<"$cpu"); l5=$(awk '{print $2}' <<<"$cpu"); l15=$(awk '{print $3}' <<<"$cpu"); cores=$(awk '{print $4}' <<<"$cpu")
-  local mem used_m cached_m avail_m total_m mem_pct
-  read used_m cached_m avail_m total_m mem_pct < <(_mem)
-  local swap swap_used_m swap_total_m swap_pct
+  local used_m avail_m total_m mem_pct
+  read used_m _ avail_m total_m mem_pct < <(_mem)
+  local swap_used_m swap_total_m swap_pct
   read swap_used_m swap_total_m swap_pct < <(_swap)
-  local droot_mount droot_used_g droot_total_g droot_pct
-  read droot_mount droot_used_g droot_total_g droot_pct < <(_disk_line / || echo "/ 0 0 0")
-  local dboot_mount dboot_used_g dboot_total_g dboot_pct
-  read dboot_mount dboot_used_g dboot_total_g dboot_pct < <(_disk_line /boot || echo "/boot 0 0 0")
-  local net def if4 if6
+  local droot_pct
+  read _ _ _ droot_pct < <(_disk_line / || echo "/ 0 0 0")
+  local def if4 if6
   IFS='|' read -r def if4 if6 < <(_net)
 
   local title
@@ -251,9 +249,9 @@ print_human() {
   local l15_per_core
   l15_per_core=$(awk -v l="$l15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.2f", l/c }')
   local c1 c5 c15
-  c1=$(color_for_pct $(awk -v l="$l1" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }'))
-  c5=$(color_for_pct $(awk -v l="$l5" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }'))
-  c15=$(color_for_pct $(awk -v l="$l15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }'))
+  c1=$(color_for_pct "$(awk -v l="$l1" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }')")
+  c5=$(color_for_pct "$(awk -v l="$l5" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }')")
+  c15=$(color_for_pct "$(awk -v l="$l15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.0f", (l*100)/c }')")
   printf "%sCPU%s:  load %s%s%s/%s%s%s/%s%s%s  cores %s%s%s  15m/core %s%s%s\n" \
     "$C_KEY" "$C_RESET" \
     "$c1" "$l1" "$C_RESET" \
@@ -310,7 +308,7 @@ print_human() {
   # Soft update reminder (read cached info only; no network here)
   local cache="${XDG_STATE_HOME:-$HOME/.local/state}/solen/update-cache.json"
   if [ -f "$cache" ]; then
-    local inst latest upd ch
+    local inst latest ch
     inst=$("${THIS_DIR}/../../serverutils" version 2>/dev/null | awk '{print $1}')
     latest=$(jq -r '.version // empty' "$cache" 2>/dev/null || true)
     ch=$(jq -r '.channel // "stable"' "$cache" 2>/dev/null || true)
@@ -357,8 +355,8 @@ print_json() {
   host="$(_host)"; os="$(_os)"; kernel="$(_kernel)"; up="$(_uptime)"
   local cpu l1 l5 l15 cores
   cpu="$(_cpu)"; l1=$(awk '{print $1}' <<<"$cpu"); l5=$(awk '{print $2}' <<<"$cpu"); l15=$(awk '{print $3}' <<<"$cpu"); cores=$(awk '{print $4}' <<<"$cpu")
-  local mem used_m cached_m avail_m total_m mem_pct
-  read used_m cached_m avail_m total_m mem_pct < <(_mem)
+  local used_m avail_m total_m mem_pct
+  read used_m _ avail_m total_m mem_pct < <(_mem)
   local swap_used_m swap_total_m swap_pct
   read swap_used_m swap_total_m swap_pct < <(_swap)
   local _m _u _t droot_pct

@@ -69,7 +69,6 @@ version="$(jq -r '.version' "$tmp_manifest")"
 url="$(jq -r '.url' "$tmp_manifest")"
 sha="$(jq -r '.sha256' "$tmp_manifest")"
 breaking="$(jq -r '.breaking // false' "$tmp_manifest")"
-sig_algo="$(jq -r '.sig_algo // empty' "$tmp_manifest")"
 sig_b64="$(jq -r '.sig_b64 // empty' "$tmp_manifest")"
 date_iso="$(jq -r '.date // empty' "$tmp_manifest")"
 [[ -n "$version" && -n "$url" && -n "$sha" ]] || { echo "Invalid manifest" >&2; exit 3; }

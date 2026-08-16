@@ -207,8 +207,6 @@ if command -v kopia >/dev/null 2>&1; then use_kopia=1; fi
 # Repository selection (default: filesystem repo under dest/kopia-repo)
 repo_kind="filesystem"
 repo_path="${dest%/}/kopia-repo"
-repo_create=${SOLEN_KOPIA_CREATE:-1}
-extra_env=""
 if [[ -n "${SOLEN_KOPIA_S3_BUCKET:-}" ]]; then
   repo_kind="s3"
   if [[ "$repo_per_profile" == "1" ]]; then

@@ -292,11 +292,21 @@ fi
 changed=0
 failed=0
 backup_ipt=""; backup_ip6t=""; backup_nft=""
+# Destination paths below are unprivileged-writable (mktemp); only the
+# source command (iptables-save/nft) needs root, not the redirect.
 if [[ "$chosen" == "iptables" || "$chosen" == "ufw" ]]; then
-  backup_ipt="$(mktemp)"; sudo iptables-save >"$backup_ipt" || true
-  if command -v ip6tables >/dev/null 2>&1; then backup_ip6t="$(mktemp)"; sudo ip6tables-save >"$backup_ip6t" || true; fi
+  backup_ipt="$(mktemp)"
+  # shellcheck disable=SC2024
+  sudo iptables-save >"$backup_ipt" || true
+  if command -v ip6tables >/dev/null 2>&1; then
+    backup_ip6t="$(mktemp)"
+    # shellcheck disable=SC2024
+    sudo ip6tables-save >"$backup_ip6t" || true
+  fi
 elif [[ "$chosen" == "nftables" ]]; then
-  backup_nft="$(mktemp)"; sudo nft list ruleset >"$backup_nft" || true
+  backup_nft="$(mktemp)"
+  # shellcheck disable=SC2024
+  sudo nft list ruleset >"$backup_nft" || true
 fi
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue

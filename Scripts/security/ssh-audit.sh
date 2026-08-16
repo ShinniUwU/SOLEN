@@ -20,7 +20,9 @@ if [[ ! -r "$conf" ]]; then
 fi
 
 val() {
-  local key="$1"; awk -v k="^\\s*"$key"\\b" 'BEGIN{v="unset"} /^[[:space:]]*#/ {next} $0~k{v=$2} END{print v}' "$conf"
+  # \s and \b aren't reliably honored in awk's dynamic (string-sourced)
+  # regex, so use portable POSIX bracket expressions instead.
+  local key="$1"; awk -v k="^[[:space:]]*${key}[[:space:]]" 'BEGIN{v="unset"} /^[[:space:]]*#/ {next} $0~k{v=$2} END{print v}' "$conf"
 }
 
 permit_root=$(val PermitRootLogin)

@@ -39,8 +39,6 @@ solen__arr_contains() { # arrname value
   local __arr_name="$1"; shift
   local needle="$1"; shift || true
   local v
-  # shellcheck disable=SC1087,SC2128
-  for v in ${!__arr_name[@]}; do :; done >/dev/null 2>&1 || true
   # iterate using indirect expansion
   local -n __arr_ref="${__arr_name}"
   for v in "${__arr_ref[@]}"; do

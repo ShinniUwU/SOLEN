@@ -36,9 +36,9 @@ disk_root() { df -P -BG / | awk 'NR==2{gsub("G","",$2);gsub("G","",$3);gsub("%",
 loads=$(cpu_loads || echo "0 0 0")
 l1=$(awk '{print $1}' <<<"$loads"); l5=$(awk '{print $2}' <<<"$loads"); l15=$(awk '{print $3}' <<<"$loads")
 cores=$(cpu_cores)
-read mem_used mem_avail mem_total mem_pct < <(mem)
+read mem_used _ mem_total mem_pct < <(mem)
 read swap_used swap_total swap_pct < <(swap)
-read d_used d_total d_pct < <(disk_root || echo "0 0 0")
+read _ _ d_pct < <(disk_root || echo "0 0 0")
 
 summary="$(host) — $(os_name); load ${l1}/${l5}/${l15} on ${cores} cores; mem ${mem_used}Mi/${mem_total}Mi; root ${d_pct}%"
 printf '{"status":"ok","summary":"%s","ts":"%s","host":"%s","metrics":{"load1":%s,"load5":%s,"load15":%s,"cores":%s,"mem_used_mi":%s,"mem_total_mi":%s,"mem_used_pct":%s,"swap_used_mi":%s,"swap_total_mi":%s,"swap_used_pct":%s,"disk_root_used_pct":%s},"details":{"os":"%s","kernel":"%s","uptime":"%s"}}\n' \
