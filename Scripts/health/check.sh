@@ -86,8 +86,6 @@ thres_or() {
   ' "$HEALTH_CFG"
 }
 
-load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo 0)
-load5=$(awk '{print $2}' /proc/loadavg 2>/dev/null || echo 0)
 load15=$(awk '{print $3}' /proc/loadavg 2>/dev/null || echo 0)
 cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)
 if ! [[ "$cores" =~ ^[0-9]+$ ]]; then cores=1; fi
@@ -130,7 +128,11 @@ fi
 
 unhealthy_containers=0
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  unhealthy_containers=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -ic '(unhealthy)' || echo 0)
+  # grep -c already prints "0" on zero matches but still exits 1, so
+  # "|| echo 0" would append a second "0" on its own line, corrupting
+  # this into a two-line value that breaks the JSON output below.
+  uc=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -ic '(unhealthy)' || true)
+  [[ "$uc" =~ ^[0-9]+$ ]] && unhealthy_containers="$uc"
 fi
 
 # thresholds
@@ -143,7 +145,6 @@ thr_mem_err=$(thres_or thresholds.mem_pressure_pct.error 85)
 
 # status computation
 st="ok"
-violations=()
 cmp() { awk -v a="$1" -v b="$2" 'BEGIN{ if(a>b) exit 0; else exit 1 }'; }
 if cmp "$disk_root_pct" "$thr_disk_err" || cmp "$load15_per_core" "$thr_load_err" || cmp "$mem_pressure_pct" "$thr_mem_err" || [[ $failed_services -gt 0 ]] || [[ $unhealthy_containers -gt 0 ]]; then
   st="error"
