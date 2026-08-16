@@ -5,11 +5,11 @@
 # usage: solen_insert_marker_block <file> <begin_marker> <end_marker> <content>
 solen_insert_marker_block() {
   local file="$1" begin="$2" end="$3" content="$4"
-  mkdir -p "$(dirname "$file")" 2>/dev/null || true
+  mkdir -p "$(dirname "$file")" 2> /dev/null || true
   touch "$file"
   # Remove existing block
   tmpfile="$(mktemp "${file}.XXXXXX")"
-  chmod --reference="$file" "$tmpfile" 2>/dev/null || true
+  chmod --reference="$file" "$tmpfile" 2> /dev/null || true
   awk -v b="$begin" -v e="$end" '
     BEGIN{inblk=0}
     { if(index($0,b)==1){inblk=1; next} }
@@ -18,7 +18,7 @@ solen_insert_marker_block() {
   ' "$file" > "$tmpfile"
   mv "$tmpfile" "$file"
   # Ensure newline at EOF
-  tail -c1 "$file" 2>/dev/null | read -r _ || echo >> "$file"
+  tail -c1 "$file" 2> /dev/null | read -r _ || echo >> "$file"
   {
     echo "$begin"
     printf "%s\n" "$content"
@@ -31,7 +31,7 @@ solen_remove_marker_block() {
   local file="$1" begin="$2" end="$3"
   [ -f "$file" ] || return 0
   tmpfile="$(mktemp "${file}.XXXXXX")"
-  chmod --reference="$file" "$tmpfile" 2>/dev/null || true
+  chmod --reference="$file" "$tmpfile" 2> /dev/null || true
   awk -v b="$begin" -v e="$end" '
     BEGIN{inblk=0}
     { if(index($0,b)==1){inblk=1; next} }
@@ -40,4 +40,3 @@ solen_remove_marker_block() {
   ' "$file" > "$tmpfile"
   mv "$tmpfile" "$file"
 }
-

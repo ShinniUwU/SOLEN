@@ -97,12 +97,13 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
     is_default="false"
     [[ "$name" == "$default_iface" ]] && is_default="true"
     summary="iface ${name} ${state}"
-    details=$(cat <<D
+    details=$(
+      cat << D
 "details":{"interface":{"name":"$(solen_json_escape "$name")","state":"$(solen_json_escape "$state")","mac":"$(solen_json_escape "${mac:-}")","addr":"$(solen_json_escape "$addrs")","default_route":$is_default}}
 D
-)
+    )
     solen_json_record_full ok "$summary" "$details"
-    any_ok=$((any_ok+1))
+    any_ok=$((any_ok + 1))
   done < "$ifaces_tmp"
 
   # Ports (if available)
@@ -119,10 +120,11 @@ D
       proc=$(awk -F 'users:[(][(]"' '{print $2}' <<< "$pline" | awk -F '"' '{print $1}' 2> /dev/null)
       ports_count=$((ports_count + 1))
       summary="port ${proto} ${localaddr}"
-      details=$(cat <<D
+      details=$(
+        cat << D
 "details":{"port":{"proto":"$proto","local":"$localaddr","process":"$(solen_json_escape "${proc:-}")"}}
 D
-)
+      )
       solen_json_record_full ok "$summary" "$details"
     done
   fi

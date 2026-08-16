@@ -44,12 +44,28 @@ CMD="${1:-status}"
 shift || true
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --unit) UNIT="${2:-}"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    --unit)
+      UNIT="${2:-}"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) shift ;;
   esac
 done
@@ -77,8 +93,10 @@ is_enabled() { systemctl is-enabled --quiet "$UNIT"; }
 
 case "$CMD" in
   status)
-    act="inactive"; is_active && act="active"
-    ena="disabled"; is_enabled && ena="enabled"
+    act="inactive"
+    is_active && act="active"
+    ena="disabled"
+    is_enabled && ena="enabled"
     summary="$UNIT $act,$ena"
     [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record ok "$summary" "" "\"metrics\":{\"active\":$([[ $act == active ]] && echo true || echo false),\"enabled\":$([[ $ena == enabled ]] && echo true || echo false)}" || solen_ok "$summary"
     ;;

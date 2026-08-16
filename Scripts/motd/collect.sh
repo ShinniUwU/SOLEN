@@ -13,7 +13,7 @@
 
 set -Eeuo pipefail
 
-host() { hostname 2>/dev/null || uname -n; }
+host() { hostname 2> /dev/null || uname -n; }
 kernel() { uname -r; }
 uptime_str() {
   if [ -r /proc/uptime ]; then
@@ -23,10 +23,13 @@ uptime_str() {
   fi
 }
 os_name() {
-  if [ -r /etc/os-release ]; then . /etc/os-release; echo "${PRETTY_NAME:-$NAME $VERSION_ID}"; else uname -s; fi
+  if [ -r /etc/os-release ]; then
+    . /etc/os-release
+    echo "${PRETTY_NAME:-$NAME $VERSION_ID}"
+  else uname -s; fi
 }
-cpu_loads() { awk '{print $1,$2,$3}' /proc/loadavg 2>/dev/null; }
-cpu_cores() { getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1; }
+cpu_loads() { awk '{print $1,$2,$3}' /proc/loadavg 2> /dev/null; }
+cpu_cores() { getconf _NPROCESSORS_ONLN 2> /dev/null || nproc 2> /dev/null || echo 1; }
 mem() {
   awk '/MemTotal:/{t=$2/1024} /MemAvailable:/{a=$2/1024} END{u=t-a;p=(t>0?u*100/t:0); printf "%.0f %.0f %.0f %.1f\n", u,a,t,p }' /proc/meminfo
 }
@@ -34,7 +37,9 @@ swap() { awk '/SwapTotal:/{t=$2/1024} /SwapFree:/{f=$2/1024} END{u=t-f;p=(t>0?u*
 disk_root() { df -P -BG / | awk 'NR==2{gsub("G","",$2);gsub("G","",$3);gsub("%","",$5); printf "%.1f %.1f %.0f\n", $3,$2,$5 }'; }
 
 loads=$(cpu_loads || echo "0 0 0")
-l1=$(awk '{print $1}' <<<"$loads"); l5=$(awk '{print $2}' <<<"$loads"); l15=$(awk '{print $3}' <<<"$loads")
+l1=$(awk '{print $1}' <<< "$loads")
+l5=$(awk '{print $2}' <<< "$loads")
+l15=$(awk '{print $3}' <<< "$loads")
 cores=$(cpu_cores)
 read mem_used _ mem_total mem_pct < <(mem)
 read swap_used swap_total swap_pct < <(swap)
@@ -45,4 +50,3 @@ printf '{"status":"ok","summary":"%s","ts":"%s","host":"%s","metrics":{"load1":%
   "$(echo "$summary" | sed 's/\\/\\\\/g; s/"/\\"/g')" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$(host)" \
   "$l1" "$l5" "$l15" "$cores" "$mem_used" "$mem_total" "$mem_pct" "$swap_used" "$swap_total" "${swap_pct:-0}" "${d_pct:-0}" \
   "$(os_name)" "$(kernel)" "$(uptime_str)"
-

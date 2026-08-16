@@ -34,20 +34,42 @@ dest_root="/var/backups/solen"
 mode="quick"
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --dest) dest_root="${2:-/var/backups/solen}"; shift 2 ;;
-    --quick) mode="quick"; shift ;;
-    --full) mode="full"; shift ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    --dest)
+      dest_root="${2:-/var/backups/solen}"
+      shift 2
+      ;;
+    --quick)
+      mode="quick"
+      shift
+      ;;
+    --full)
+      mode="full"
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) break ;;
   esac
 done
 
 if [[ $SOLEN_FLAG_DRYRUN -eq 0 || $SOLEN_FLAG_YES -eq 1 ]]; then
-  if ! command -v kopia >/dev/null 2>&1; then
+  if ! command -v kopia > /dev/null 2>&1; then
     solen_err "kopia not installed"
     [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "kopia not installed" "" "\"code\":2"
     exit 2
@@ -64,11 +86,14 @@ if [[ -z "${KOPIA_PASSWORD:-}" && -z "${KOPIA_PASSWORD_FILE:-}" ]]; then
 fi
 
 actions=""
-SUDO=""; [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]] && SUDO="sudo -E"
+SUDO=""
+[[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]] && SUDO="sudo -E"
 if [[ "$repo_kind" == filesystem ]]; then
   actions+=$"$SUDO kopia repository connect filesystem --path \"$repo_path\" 2>/dev/null || $SUDO kopia repository create filesystem --path \"$repo_path\"\n"
 else
-  region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"; endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
+  region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"
+  endpoint_opt=""
+  [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
   actions+=$"kopia repository connect s3 --bucket \"${SOLEN_KOPIA_S3_BUCKET}\" --prefix \"${SOLEN_KOPIA_S3_PREFIX:-solen}\" --region \"${region}\"${endpoint_opt} 2>/dev/null || \\\n+kopia repository create s3 --bucket \"${SOLEN_KOPIA_S3_BUCKET}\" --prefix \"${SOLEN_KOPIA_S3_PREFIX:-solen}\" --region \"${region}\"${endpoint_opt}\n"
 fi
 if [[ "$mode" == "quick" ]]; then
@@ -98,15 +123,15 @@ while IFS= read -r line; do
   bash -c "$line"
   rc=$?
   set -e
-  if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
+  if [[ $rc -eq 0 ]]; then changed=$((changed + 1)); else solen_warn "step failed (rc=$rc): $line"; fi
 done <<< "$actions"
 
 maint_info=""
 packs="" contents="" errors=0 compaction_mentions=0
 set +e
-maint_info=$($SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia maintenance info 2>/dev/null)
+maint_info=$($SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia maintenance info 2> /dev/null)
 rc_info=$?
-stats_json=$($SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia content stats --json 2>/dev/null)
+stats_json=$($SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia content stats --json 2> /dev/null)
 rc_stats=$?
 set -e
 if [[ $rc_info -eq 0 && -n "$maint_info" ]]; then

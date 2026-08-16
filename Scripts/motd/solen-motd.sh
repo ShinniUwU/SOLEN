@@ -88,9 +88,9 @@ read_banner() {
   # Get version from serverutils
   local version=""
   local root
-  root="$(cd "${THIS_DIR}/../.." 2>/dev/null && pwd)"
+  root="$(cd "${THIS_DIR}/../.." 2> /dev/null && pwd)"
   if [ -n "$root" ] && [ -x "$root/serverutils" ]; then
-    version=$("$root/serverutils" version 2>/dev/null | awk '{print $1}')
+    version=$("$root/serverutils" version 2> /dev/null | awk '{print $1}')
   fi
   [ -z "$version" ] && version="dev"
 
@@ -182,8 +182,10 @@ _net() {
 color_for_pct() {
   # echo color code based on pct thresholds
   local p="${1:-0}"
-  if awk -v x="$p" 'BEGIN{exit !(x<50)}'; then printf "%s" "$C_OK"; 
-  elif awk -v x="$p" 'BEGIN{exit !(x<80)}'; then printf "%s" "$C_WARN"; 
+  if awk -v x="$p" 'BEGIN{exit !(x<50)}'; then
+    printf "%s" "$C_OK"
+  elif awk -v x="$p" 'BEGIN{exit !(x<80)}'; then
+    printf "%s" "$C_WARN"
   else printf "%s" "$C_ERR"; fi
 }
 
@@ -195,7 +197,13 @@ bar() {
   fill=$(awk -v p="$pct" -v w="$width" "BEGIN{ if(p<0)p=0; if(p>100)p=100; printf \"%d\", int(p*w/100+0.5) }")
   [ "$fill" -gt "$width" ] && fill="$width"
   local filled_char unf_char
-  if [ "$PLAIN" != "1" ]; then filled_char="█"; unf_char="░"; else filled_char="#"; unf_char="-"; fi
+  if [ "$PLAIN" != "1" ]; then
+    filled_char="█"
+    unf_char="░"
+  else
+    filled_char="#"
+    unf_char="-"
+  fi
   local col
   col=$(color_for_pct "$pct")
   printf "["
@@ -227,9 +235,16 @@ print_human() {
 
   # Header
   local host os kernel up
-  host="$(_host)"; os="$(_os)"; kernel="$(_kernel)"; up="$(_uptime)"
+  host="$(_host)"
+  os="$(_os)"
+  kernel="$(_kernel)"
+  up="$(_uptime)"
   local cpu loads l1 l5 l15 cores
-  cpu="$(_cpu)"; l1=$(awk '{print $1}' <<<"$cpu"); l5=$(awk '{print $2}' <<<"$cpu"); l15=$(awk '{print $3}' <<<"$cpu"); cores=$(awk '{print $4}' <<<"$cpu")
+  cpu="$(_cpu)"
+  l1=$(awk '{print $1}' <<< "$cpu")
+  l5=$(awk '{print $2}' <<< "$cpu")
+  l15=$(awk '{print $3}' <<< "$cpu")
+  cores=$(awk '{print $4}' <<< "$cpu")
   local used_m avail_m total_m mem_pct
   read used_m _ avail_m total_m mem_pct < <(_mem)
   local swap_used_m swap_total_m swap_pct
@@ -262,22 +277,25 @@ print_human() {
 
   # Memory line
   local used_g total_g avail_g mem_val
-  used_g=$(to_gib "$used_m"); total_g=$(to_gib "$total_m"); avail_g=$(to_gib "$avail_m")
+  used_g=$(to_gib "$used_m")
+  total_g=$(to_gib "$total_m")
+  avail_g=$(to_gib "$avail_m")
   mem_val="${C_VAL}${used_g}G${C_RESET}/${C_VAL}${total_g}G${C_RESET} avail ${C_VAL}${avail_g}G${C_RESET}"
   printf "%s %s %s %s%s%%%s\n" "${C_KEY}Mem${C_RESET}:" "$(vpad "$mem_val" 32)" "$(bar "$mem_pct" 24)" "${C_DIM}" "${mem_pct}" "${C_RESET}"
 
   # Swap line (if any)
   if [ "${swap_total_m:-0}" != "0" ]; then
     local swap_used_g swap_total_g swap_val
-    swap_used_g=$(to_gib "$swap_used_m"); swap_total_g=$(to_gib "$swap_total_m")
+    swap_used_g=$(to_gib "$swap_used_m")
+    swap_total_g=$(to_gib "$swap_total_m")
     swap_val="${C_VAL}${swap_used_g}G${C_RESET}/${C_VAL}${swap_total_g}G${C_RESET}"
     printf "%s %s %s %s%s%%%s\n" "${C_KEY}Swap${C_RESET}:" "$(vpad "$swap_val" 32)" "$(bar "$swap_pct" 24)" "${C_DIM}" "${swap_pct}" "${C_RESET}"
   fi
 
   # Disks (top mounts)
   list_mounts() {
-    df -P -BG -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs -x udev 2>/dev/null \
-      | awk 'NR>1 && $6!~/^\/(dev|sys|proc|run|boot\/efi)($|\/)/{gsub("G","",$2); gsub("G","",$3); gsub("%","",$5); printf "%s %s %s %s\n", $6,$3,$2,$5 }'
+    df -P -BG -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs -x udev 2> /dev/null |
+      awk 'NR>1 && $6!~/^\/(dev|sys|proc|run|boot\/efi)($|\/)/{gsub("G","",$2); gsub("G","",$3); gsub("%","",$5); printf "%s %s %s %s\n", $6,$3,$2,$5 }'
   }
   local printed=0
   while read -r mnt used total pct; do
@@ -287,14 +305,14 @@ print_human() {
     [ "${#mnt_short}" -gt 12 ] && mnt_short="${mnt_short:0:11}…"
     disk_val="$(vpad "$mnt_short" 13)${C_VAL}${used}G${C_RESET}/${C_VAL}${total}G${C_RESET}"
     printf "%s %s %s %s%s%%%s\n" "${C_KEY}Disk${C_RESET}:" "$(vpad "$disk_val" 32)" "$(bar "$pct" 24)" "${C_DIM}" "${pct}" "${C_RESET}"
-    printed=$((printed+1))
+    printed=$((printed + 1))
     [ $printed -ge 3 ] && break
   done < <(list_mounts)
 
   # Last login (best-effort)
   last_line=""
-  if command -v last >/dev/null 2>&1; then
-    last_line=$(last -n 2 -R -w "$USER" 2>/dev/null | grep -v 'wtmp begins' | head -n1 | sed 's/  \+/ /g')
+  if command -v last > /dev/null 2>&1; then
+    last_line=$(last -n 2 -R -w "$USER" 2> /dev/null | grep -v 'wtmp begins' | head -n1 | sed 's/  \+/ /g')
   fi
   if [ -n "$last_line" ]; then
     w "${C_KEY}Last login${C_RESET}: ${C_VAL}${last_line}${C_RESET}"
@@ -309,41 +327,49 @@ print_human() {
   local cache="${XDG_STATE_HOME:-$HOME/.local/state}/solen/update-cache.json"
   if [ -f "$cache" ]; then
     local inst latest ch
-    inst=$("${THIS_DIR}/../../serverutils" version 2>/dev/null | awk '{print $1}')
-    latest=$(jq -r '.version // empty' "$cache" 2>/dev/null || true)
-    ch=$(jq -r '.channel // "stable"' "$cache" 2>/dev/null || true)
+    inst=$("${THIS_DIR}/../../serverutils" version 2> /dev/null | awk '{print $1}')
+    latest=$(jq -r '.version // empty' "$cache" 2> /dev/null || true)
+    ch=$(jq -r '.channel // "stable"' "$cache" 2> /dev/null || true)
     # SemVer compare with basic pre-release handling: rc/nightly < final
     if [ -n "$inst" ] && [ -n "$latest" ]; then
-      inst_main="${inst%%-*}"; latest_main="${latest%%-*}"
-      inst_pre="${inst#${inst_main}}"; latest_pre="${latest#${latest_main}}"
+      inst_main="${inst%%-*}"
+      latest_main="${latest%%-*}"
+      inst_pre="${inst#${inst_main}}"
+      latest_pre="${latest#${latest_main}}"
       cmp_main=$(awk -v A="$inst_main" -v B="$latest_main" 'BEGIN{n=split(A,a,".");m=split(B,b,"."); for(i=1;i<= (n>m?n:m); i++){aa=(i<=n?a[i]:0);bb=(i<=m?b[i]:0); if(aa+0<bb+0){print -1; exit} if(aa+0>bb+0){print 1; exit}} print 0}')
-      if [ "$cmp_main" -lt 0 ]; then cmp=-1
-      elif [ "$cmp_main" -gt 0 ]; then cmp=1
+      if [ "$cmp_main" -lt 0 ]; then
+        cmp=-1
+      elif [ "$cmp_main" -gt 0 ]; then
+        cmp=1
       else
         # Same main; treat pre-release as lower than final
-        if [ -n "$inst_pre" ] && [ -z "$latest_pre" ]; then cmp=-1
-        elif [ -z "$inst_pre" ] && [ -n "$latest_pre" ]; then cmp=1
+        if [ -n "$inst_pre" ] && [ -z "$latest_pre" ]; then
+          cmp=-1
+        elif [ -z "$inst_pre" ] && [ -n "$latest_pre" ]; then
+          cmp=1
         else cmp=0; fi
       fi
       if [ "$cmp" -lt 0 ]; then
         # Show at most once per day per version
         local stamp_dir="${XDG_STATE_HOME:-$HOME/.local/state}/solen"
         local stamp_file="$stamp_dir/update-notify.json"
-        mkdir -p "$stamp_dir" 2>/dev/null || true
-        local today; today=$(date -u +%F)
+        mkdir -p "$stamp_dir" 2> /dev/null || true
+        local today
+        today=$(date -u +%F)
         # Additionally, suppress if checked very recently (< 1h)
-        local checked_recent=0; last_check="$(jq -r '.checked_at // empty' "$cache" 2>/dev/null || true)"
+        local checked_recent=0
+        last_check="$(jq -r '.checked_at // empty' "$cache" 2> /dev/null || true)"
         if [ -n "$last_check" ]; then
-          if [ $(( $(date -u +%s) - $(date -u -d "$last_check" +%s 2>/dev/null || echo 0) )) -lt 3600 ]; then checked_recent=1; fi
+          if [ $(($(date -u +%s) - $(date -u -d "$last_check" +%s 2> /dev/null || echo 0))) -lt 3600 ]; then checked_recent=1; fi
         fi
         local stamped_ver stamped_date
         if [ -f "$stamp_file" ]; then
-          stamped_ver=$(jq -r '.version // empty' "$stamp_file" 2>/dev/null || true)
-          stamped_date=$(jq -r '.date // empty' "$stamp_file" 2>/dev/null || true)
+          stamped_ver=$(jq -r '.version // empty' "$stamp_file" 2> /dev/null || true)
+          stamped_date=$(jq -r '.date // empty' "$stamp_file" 2> /dev/null || true)
         fi
         if { [ "$stamped_ver" != "$latest" ] || [ "$stamped_date" != "$today" ]; } && [ $checked_recent -eq 0 ]; then
           w "${C_DIM}· solen: update available — ${inst} → ${latest} (${ch}); run ${C_VAL}serverutils update --apply${C_RESET}"
-          printf '{"version":"%s","date":"%s"}\n' "$latest" "$today" > "$stamp_file" 2>/dev/null || true
+          printf '{"version":"%s","date":"%s"}\n' "$latest" "$today" > "$stamp_file" 2> /dev/null || true
         fi
       fi
     fi
@@ -352,9 +378,16 @@ print_human() {
 
 print_json() {
   local host os kernel up
-  host="$(_host)"; os="$(_os)"; kernel="$(_kernel)"; up="$(_uptime)"
+  host="$(_host)"
+  os="$(_os)"
+  kernel="$(_kernel)"
+  up="$(_uptime)"
   local cpu l1 l5 l15 cores
-  cpu="$(_cpu)"; l1=$(awk '{print $1}' <<<"$cpu"); l5=$(awk '{print $2}' <<<"$cpu"); l15=$(awk '{print $3}' <<<"$cpu"); cores=$(awk '{print $4}' <<<"$cpu")
+  cpu="$(_cpu)"
+  l1=$(awk '{print $1}' <<< "$cpu")
+  l5=$(awk '{print $2}' <<< "$cpu")
+  l15=$(awk '{print $3}' <<< "$cpu")
+  cores=$(awk '{print $4}' <<< "$cpu")
   local used_m avail_m total_m mem_pct
   read used_m _ avail_m total_m mem_pct < <(_mem)
   local swap_used_m swap_total_m swap_pct
@@ -371,8 +404,8 @@ print_json() {
 
   # Optional extras: updates, services, containers
   local updates=""
-  if command -v pm_detect >/dev/null 2>&1; then pm_detect || true; fi
-  if command -v pm_check_updates_count >/dev/null 2>&1; then updates=$(pm_check_updates_count 2>/dev/null || echo 0); fi
+  if command -v pm_detect > /dev/null 2>&1; then pm_detect || true; fi
+  if command -v pm_check_updates_count > /dev/null 2>&1; then updates=$(pm_check_updates_count 2> /dev/null || echo 0); fi
 
   local services_json="[]" services_file
   if [ -f "$HOME/.config/solen/services" ]; then services_file="$HOME/.config/solen/services"; elif [ -f "/etc/solen/services" ]; then services_file="/etc/solen/services"; fi
@@ -382,12 +415,13 @@ print_json() {
       local first=1
       services_json="["
       for ln in "${_lines[@]}"; do
-        label="${ln%%;*}"; target="${ln#*;}"
+        label="${ln%%;*}"
+        target="${ln#*;}"
         status="down"
         if printf '%s' "$target" | grep -q '\.'; then
-          systemctl is-active --quiet "$target" 2>/dev/null && status="up"
+          systemctl is-active --quiet "$target" 2> /dev/null && status="up"
         else
-          pgrep -f "$target" >/dev/null 2>&1 && status="up"
+          pgrep -f "$target" > /dev/null 2>&1 && status="up"
         fi
         esc_label=$(printf '%s' "$label" | sed 's/\\/\\\\/g; s/"/\\"/g')
         [ $first -eq 0 ] && services_json+=" ," || first=0
@@ -398,17 +432,18 @@ print_json() {
   fi
 
   local docker_json podman_json
-  docker_json=""; podman_json=""
-  if command -v docker >/dev/null 2>&1; then
-    dr=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-    dt=$(docker ps -aq 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-    dnames=$(docker ps --format '{{.Names}}' 2>/dev/null | head -n 3 | paste -sd, -)
+  docker_json=""
+  podman_json=""
+  if command -v docker > /dev/null 2>&1; then
+    dr=$(docker ps -q 2> /dev/null | wc -l | tr -d ' ' || echo 0)
+    dt=$(docker ps -aq 2> /dev/null | wc -l | tr -d ' ' || echo 0)
+    dnames=$(docker ps --format '{{.Names}}' 2> /dev/null | head -n 3 | paste -sd, -)
     docker_json=$(printf '{"running":%s,"total":%s,"top":[%s]}' "$dr" "$dt" "$(printf '%s' "$dnames" | sed 's/\([^,]*\)/"\1"/g')")
   fi
-  if command -v podman >/dev/null 2>&1; then
-    pr=$(podman ps -q 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-    pt=$(podman ps -aq 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-    pnames=$(podman ps --format '{{.Names}}' 2>/dev/null | head -n 3 | paste -sd, -)
+  if command -v podman > /dev/null 2>&1; then
+    pr=$(podman ps -q 2> /dev/null | wc -l | tr -d ' ' || echo 0)
+    pt=$(podman ps -aq 2> /dev/null | wc -l | tr -d ' ' || echo 0)
+    pnames=$(podman ps --format '{{.Names}}' 2> /dev/null | head -n 3 | paste -sd, -)
     podman_json=$(printf '{"running":%s,"total":%s,"top":[%s]}' "$pr" "$pt" "$(printf '%s' "$pnames" | sed 's/\([^,]*\)/"\1"/g')")
   fi
 
@@ -417,10 +452,10 @@ print_json() {
       "$(echo "$summary" | sed 's/\\/\\\\/g; s/"/\\"/g')" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$host" \
       "$l1" "$l5" "$l15" "$cores" "$l15_per_core" "$used_m" "$total_m" "$mem_pct" "$swap_used_m" "$swap_total_m" "${swap_pct:-0}" "${droot_pct:-0}" \
       "${def:-unknown}" "${if4:-}" "${if6:-}" "$os" "$kernel" "$up" \
-      "$( [ -n "$updates" ] && printf ',"updates":%s' "$updates" )" \
-      "$( [ -n "$docker_json" ] && printf ',"docker":%s' "$docker_json" )" \
-      "$( [ -n "$podman_json" ] && printf ',"podman":%s' "$podman_json" )" \
-      "$( [ "$services_json" != "[]" ] && printf ',"services":%s' "$services_json" )"
+      "$([ -n "$updates" ] && printf ',"updates":%s' "$updates")" \
+      "$([ -n "$docker_json" ] && printf ',"docker":%s' "$docker_json")" \
+      "$([ -n "$podman_json" ] && printf ',"podman":%s' "$podman_json")" \
+      "$([ "$services_json" != "[]" ] && printf ',"services":%s' "$services_json")"
   else
     printf '{"status":"ok","summary":"%s","ts":"%s","host":"%s","metrics":{"load1":%s,"load5":%s,"load15":%s,"cores":%s,"load15_per_core":%s,"mem_used_mi":%s,"mem_total_mi":%s,"mem_used_pct":%s,"swap_used_mi":%s,"swap_total_mi":%s,"swap_used_pct":%s,"disk_root_used_pct":%s},"details":{"default_iface":"%s","ipv4":"%s","ipv6":"%s","os":"%s","kernel":"%s","uptime":"%s"}}\n' \
       "$(echo "$summary" | sed 's/\\/\\\\/g; s/"/\\"/g')" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$host" \
@@ -440,11 +475,18 @@ main() {
   fi
   if [ $QUIET -eq 1 ]; then
     local host os cpu l1 l5 l15 used_m total_m upcnt
-    host="$(_host)"; os="$(_os)"; cpu="$(_cpu)"
-    l1=$(awk '{print $1}' <<<"$cpu"); l5=$(awk '{print $2}' <<<"$cpu"); l15=$(awk '{print $3}' <<<"$cpu")
+    host="$(_host)"
+    os="$(_os)"
+    cpu="$(_cpu)"
+    l1=$(awk '{print $1}' <<< "$cpu")
+    l5=$(awk '{print $2}' <<< "$cpu")
+    l15=$(awk '{print $3}' <<< "$cpu")
     read used_m _c _a total_m _p < <(_mem)
     upcnt=""
-    if command -v pm_detect >/dev/null 2>&1 && command -v pm_check_updates_count >/dev/null 2>&1; then pm_detect || true; upcnt=$(pm_check_updates_count 2>/dev/null || echo 0); fi
+    if command -v pm_detect > /dev/null 2>&1 && command -v pm_check_updates_count > /dev/null 2>&1; then
+      pm_detect || true
+      upcnt=$(pm_check_updates_count 2> /dev/null || echo 0)
+    fi
     printf "%s — load %s/%s/%s; mem %sMi/%sMi%s\n" "$host" "$l1" "$l5" "$l15" "$used_m" "$total_m" "${upcnt:+; updates ${upcnt}}"
     return
   fi
@@ -458,32 +500,46 @@ main() {
       while IFS= read -r line; do
         [ -z "$line" ] && continue
         printf '%s' "$line" | grep -q '^#' && continue
-        label="${line%%;*}"; target="${line#*;}"
-        status="down"; sym="✗"; col="$C_ERR"
+        label="${line%%;*}"
+        target="${line#*;}"
+        status="down"
+        sym="✗"
+        col="$C_ERR"
         if printf '%s' "$target" | grep -q '\.'; then
-          systemctl is-active --quiet "$target" 2>/dev/null && { status="up"; sym="✓"; col="$C_OK"; }
+          systemctl is-active --quiet "$target" 2> /dev/null && {
+            status="up"
+            sym="✓"
+            col="$C_OK"
+          }
         else
-          pgrep -f "$target" >/dev/null 2>&1 && { status="up"; sym="✓"; col="$C_OK"; }
+          pgrep -f "$target" > /dev/null 2>&1 && {
+            status="up"
+            sym="✓"
+            col="$C_OK"
+          }
         fi
         w "  ${label}: ${col}${sym}${C_RESET} ${status}"
       done < "$services_file"
     fi
     # Containers
-    if command -v docker >/dev/null 2>&1; then
-      dr=$(docker ps -q 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-      dt=$(docker ps -aq 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    if command -v docker > /dev/null 2>&1; then
+      dr=$(docker ps -q 2> /dev/null | wc -l | tr -d ' ' || echo 0)
+      dt=$(docker ps -aq 2> /dev/null | wc -l | tr -d ' ' || echo 0)
       w "${C_TITLE}""Docker""${C_RESET}: running ${C_VAL}${dr}${C_RESET}/${C_VAL}${dt}${C_RESET}"
-      docker ps --format '{{.Names}}' 2>/dev/null | head -n3 | awk '{printf "  - %s\n", $0}'
+      docker ps --format '{{.Names}}' 2> /dev/null | head -n3 | awk '{printf "  - %s\n", $0}'
     fi
-    if command -v podman >/dev/null 2>&1; then
-      pr=$(podman ps -q 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-      pt=$(podman ps -aq 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    if command -v podman > /dev/null 2>&1; then
+      pr=$(podman ps -q 2> /dev/null | wc -l | tr -d ' ' || echo 0)
+      pt=$(podman ps -aq 2> /dev/null | wc -l | tr -d ' ' || echo 0)
       w "${C_TITLE}""Podman""${C_RESET}: running ${C_VAL}${pr}${C_RESET}/${C_VAL}${pt}${C_RESET}"
-      podman ps --format '{{.Names}}' 2>/dev/null | head -n3 | awk '{printf "  - %s\n", $0}'
+      podman ps --format '{{.Names}}' 2> /dev/null | head -n3 | awk '{printf "  - %s\n", $0}'
     fi
     # Updates
     upcnt=""
-    if command -v pm_detect >/dev/null 2>&1 && command -v pm_check_updates_count >/dev/null 2>&1; then pm_detect || true; upcnt=$(pm_check_updates_count 2>/dev/null || echo 0); fi
+    if command -v pm_detect > /dev/null 2>&1 && command -v pm_check_updates_count > /dev/null 2>&1; then
+      pm_detect || true
+      upcnt=$(pm_check_updates_count 2> /dev/null || echo 0)
+    fi
     if [ -n "$upcnt" ]; then w "${C_TITLE}""Updates""${C_RESET}: ${C_VAL}${upcnt}${C_RESET}"; fi
   fi
 }

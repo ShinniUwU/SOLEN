@@ -20,47 +20,83 @@ if [ -f "${THIS_DIR}/../lib/edit.sh" ]; then . "${THIS_DIR}/../lib/edit.sh"; fi
 if [ -f "${THIS_DIR}/../lib/pm.sh" ]; then . "${THIS_DIR}/../lib/pm.sh"; fi
 
 # Fallbacks (only if not already defined by libs)
-type solen_info >/dev/null 2>&1 || solen_info() { echo -e "\033[0;36mℹ️  $*\033[0m"; }
-type solen_ok   >/dev/null 2>&1 || solen_ok()   { echo -e "\033[0;32m✅ $*\033[0m"; }
-type solen_warn >/dev/null 2>&1 || solen_warn() { echo -e "\033[0;33m⚠️  $*\033[0m"; }
-type solen_err  >/dev/null 2>&1 || solen_err()  { echo -e "\033[0;31m❌ $*\033[0m" 1>&2; }
+type solen_info > /dev/null 2>&1 || solen_info() { echo -e "\033[0;36mℹ️  $*\033[0m"; }
+type solen_ok > /dev/null 2>&1 || solen_ok() { echo -e "\033[0;32m✅ $*\033[0m"; }
+type solen_warn > /dev/null 2>&1 || solen_warn() { echo -e "\033[0;33m⚠️  $*\033[0m"; }
+type solen_err > /dev/null 2>&1 || solen_err() { echo -e "\033[0;31m❌ $*\033[0m" 1>&2; }
 
-type solen_init_flags >/dev/null 2>&1 || solen_init_flags() {
-  : "${SOLEN_FLAG_YES:=0}"; : "${SOLEN_FLAG_JSON:=0}"; : "${SOLEN_FLAG_DRYRUN:=1}";
+type solen_init_flags > /dev/null 2>&1 || solen_init_flags() {
+  : "${SOLEN_FLAG_YES:=0}"
+  : "${SOLEN_FLAG_JSON:=0}"
+  : "${SOLEN_FLAG_DRYRUN:=1}"
   [ "$SOLEN_FLAG_YES" = 1 ] && SOLEN_FLAG_DRYRUN=0 || true
 }
-type solen_parse_common_flag >/dev/null 2>&1 || solen_parse_common_flag() {
-  case "$1" in --yes|-y) SOLEN_FLAG_YES=1; SOLEN_FLAG_DRYRUN=0; return 0;; --dry-run) SOLEN_FLAG_DRYRUN=1; return 0;; --json) SOLEN_FLAG_JSON=1; return 0;; esac; return 1;
+type solen_parse_common_flag > /dev/null 2>&1 || solen_parse_common_flag() {
+  case "$1" in --yes | -y)
+    SOLEN_FLAG_YES=1
+    SOLEN_FLAG_DRYRUN=0
+    return 0
+    ;;
+  --dry-run)
+    SOLEN_FLAG_DRYRUN=1
+    return 0
+    ;;
+  --json)
+    SOLEN_FLAG_JSON=1
+    return 0
+    ;;
+  esac
+  return 1
 }
-type solen_json_record >/dev/null 2>&1 || solen_json_record() {
-  local status="$1" summary="$2" actions_text="${3:-}" extra="${4:-}" host; host=$(hostname 2>/dev/null || uname -n)
+type solen_json_record > /dev/null 2>&1 || solen_json_record() {
+  local status="$1" summary="$2" actions_text="${3:-}" extra="${4:-}" host
+  host=$(hostname 2> /dev/null || uname -n)
   _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-  local actions_json="[]"; if [ -n "$actions_text" ]; then actions_json="["; local first=1; while IFS= read -r l; do [ -z "$l" ] && continue; local e; e="$(_esc "$l")"; [ $first -eq 0 ] && actions_json+=" ," || first=0; actions_json+="\"$e\""; done <<EOF
+  local actions_json="[]"
+  if [ -n "$actions_text" ]; then
+    actions_json="["
+    local first=1
+    while IFS= read -r l; do
+      [ -z "$l" ] && continue
+      local e
+      e="$(_esc "$l")"
+      [ $first -eq 0 ] && actions_json+=" ," || first=0
+      actions_json+="\"$e\""
+    done << EOF
 ${actions_text}
 EOF
-  actions_json+="]"; fi
+    actions_json+="]"
+  fi
   printf '{"status":"%s","summary":"%s","ts":"%s","host":"%s","actions":%s%s}\n' \
     "$(_esc "$status")" "$(_esc "$summary")" "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$(_esc "$host")" "$actions_json" "${extra:+,${extra}}"
 }
 
-type solen_insert_marker_block >/dev/null 2>&1 || solen_insert_marker_block() {
+type solen_insert_marker_block > /dev/null 2>&1 || solen_insert_marker_block() {
   local file="$1" begin="$2" end="$3" content="$4" tmp
-  mkdir -p "$(dirname "$file")" 2>/dev/null || true; touch "$file"
-  tmp="$(mktemp "${file}.XXXXXX")"; chmod --reference="$file" "$tmp" 2>/dev/null || true
+  mkdir -p "$(dirname "$file")" 2> /dev/null || true
+  touch "$file"
+  tmp="$(mktemp "${file}.XXXXXX")"
+  chmod --reference="$file" "$tmp" 2> /dev/null || true
   awk -v b="$begin" -v e="$end" 'BEGIN{inblk=0} index($0,b)==1{inblk=1;next} index($0,e)==1{inblk=0;next} !inblk{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
-  tail -c1 "$file" >/dev/null 2>&1 || echo >> "$file"
-  { echo "$begin"; printf "%s\n" "$content"; echo "$end"; } >> "$file"
+  tail -c1 "$file" > /dev/null 2>&1 || echo >> "$file"
+  {
+    echo "$begin"
+    printf "%s\n" "$content"
+    echo "$end"
+  } >> "$file"
 }
-type solen_remove_marker_block >/dev/null 2>&1 || solen_remove_marker_block() {
-  local file="$1" begin="$2" end="$3" tmp; [ -f "$file" ] || return 0
-  tmp="$(mktemp "${file}.XXXXXX")"; chmod --reference="$file" "$tmp" 2>/dev/null || true
+type solen_remove_marker_block > /dev/null 2>&1 || solen_remove_marker_block() {
+  local file="$1" begin="$2" end="$3" tmp
+  [ -f "$file" ] || return 0
+  tmp="$(mktemp "${file}.XXXXXX")"
+  chmod --reference="$file" "$tmp" 2> /dev/null || true
   awk -v b="$begin" -v e="$end" 'BEGIN{inblk=0} index($0,b)==1{inblk=1;next} index($0,e)==1{inblk=0;next} !inblk{print $0}' "$file" > "$tmp" && mv "$tmp" "$file"
 }
 
-type pm_detect >/dev/null 2>&1 || pm_detect() { if command -v apt-get >/dev/null; then __SOLEN_PM=apt; elif command -v dnf >/dev/null; then __SOLEN_PM=dnf; elif command -v pacman >/dev/null; then __SOLEN_PM=pacman; elif command -v zypper >/dev/null; then __SOLEN_PM=zypper; else __SOLEN_PM=unknown; fi; }
-type pm_name   >/dev/null 2>&1 || pm_name()   { echo "${__SOLEN_PM:-unknown}"; }
-type pm_update_plan >/dev/null 2>&1 || pm_update_plan() { case "${__SOLEN_PM:-unknown}" in apt) echo "sudo apt-get update -y";; dnf) echo "sudo dnf -y makecache";; pacman) echo "sudo pacman -Sy --noconfirm";; zypper) echo "sudo zypper -n refresh";; *) echo "# pm update (unsupported)";; esac; }
-type pm_install_plan >/dev/null 2>&1 || pm_install_plan() { case "${__SOLEN_PM:-unknown}" in apt) echo "sudo apt-get install -y $*";; dnf) echo "sudo dnf -y install $*";; pacman) echo "sudo pacman -S --noconfirm $*";; zypper) echo "sudo zypper -n install $*";; *) echo "# pm install $* (unsupported)";; esac; }
+type pm_detect > /dev/null 2>&1 || pm_detect() { if command -v apt-get > /dev/null; then __SOLEN_PM=apt; elif command -v dnf > /dev/null; then __SOLEN_PM=dnf; elif command -v pacman > /dev/null; then __SOLEN_PM=pacman; elif command -v zypper > /dev/null; then __SOLEN_PM=zypper; else __SOLEN_PM=unknown; fi; }
+type pm_name > /dev/null 2>&1 || pm_name() { echo "${__SOLEN_PM:-unknown}"; }
+type pm_update_plan > /dev/null 2>&1 || pm_update_plan() { case "${__SOLEN_PM:-unknown}" in apt) echo "sudo apt-get update -y" ;; dnf) echo "sudo dnf -y makecache" ;; pacman) echo "sudo pacman -Sy --noconfirm" ;; zypper) echo "sudo zypper -n refresh" ;; *) echo "# pm update (unsupported)" ;; esac }
+type pm_install_plan > /dev/null 2>&1 || pm_install_plan() { case "${__SOLEN_PM:-unknown}" in apt) echo "sudo apt-get install -y $*" ;; dnf) echo "sudo dnf -y install $*" ;; pacman) echo "sudo pacman -S --noconfirm $*" ;; zypper) echo "sudo zypper -n install $*" ;; *) echo "# pm install $* (unsupported)" ;; esac }
 
 solen_init_flags
 
@@ -94,24 +130,71 @@ copy_shell_assets=0
 units_scope=""
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --with-motd) with_motd=1; shift ;;
-    --with-zsh) with_zsh=1; shift ;;
-    --with-starship) with_starship=1; shift ;;
-    --copy-shell-assets) copy_shell_assets=1; shift ;;
+    --with-motd)
+      with_motd=1
+      shift
+      ;;
+    --with-zsh)
+      with_zsh=1
+      shift
+      ;;
+    --with-starship)
+      with_starship=1
+      shift
+      ;;
+    --copy-shell-assets)
+      copy_shell_assets=1
+      shift
+      ;;
     --units)
       units_scope="${2:-}"
-      case "$units_scope" in user|system) ;; *) solen_err "--units requires 'user' or 'system'"; exit 1 ;; esac
-      shift 2 ;;
-    --user) scope="user"; scope_set=1; shift ;;
-    --global) scope="global"; scope_set=1; shift ;;
-    --uninstall) do_uninstall=1; shift ;;
-    --uninstall-everything) do_uninstall_all=1; shift ;;
-    --show-plan) show_plan=1; shift ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+      case "$units_scope" in user | system) ;; *)
+        solen_err "--units requires 'user' or 'system'"
+        exit 1
+        ;;
+      esac
+      shift 2
+      ;;
+    --user)
+      scope="user"
+      scope_set=1
+      shift
+      ;;
+    --global)
+      scope="global"
+      scope_set=1
+      shift
+      ;;
+    --uninstall)
+      do_uninstall=1
+      shift
+      ;;
+    --uninstall-everything)
+      do_uninstall_all=1
+      shift
+      ;;
+    --show-plan)
+      show_plan=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) break ;;
   esac
 done
@@ -143,7 +226,7 @@ link_runner_global() {
 }
 
 path_check_msg() {
-  if command -v serverutils >/dev/null 2>&1; then
+  if command -v serverutils > /dev/null 2>&1; then
     solen_ok "serverutils on PATH"
   else
     solen_warn "serverutils not on PATH in current shell; open a new shell or source your rc file"
@@ -154,24 +237,25 @@ install_motd_hooks_user() {
   # Install guarded blocks for common shells regardless of current $SHELL
   # Bash
   # Ensure ~/.local/bin precedes PATH in interactive shells so 'serverutils' resolves in subshells
-  if ! grep -Fq ">>> SOLEN PATH_USER_LOCAL" "$HOME/.bashrc" 2>/dev/null; then
+  if ! grep -Fq ">>> SOLEN PATH_USER_LOCAL" "$HOME/.bashrc" 2> /dev/null; then
     solen_insert_marker_block "$HOME/.bashrc" \
       "# >>> SOLEN PATH_USER_LOCAL (do not edit) >>>" \
       "# <<< SOLEN PATH_USER_LOCAL (managed) <<<" \
-      "$(cat <<'EOS'
+      "$(
+        cat << 'EOS'
 # Ensure ~/.local/bin on PATH
 if [ -d "$HOME/.local/bin" ]; then
   case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH";; esac
   export PATH
 fi
 EOS
-)"
+      )"
   fi
   solen_insert_marker_block "$HOME/.bashrc" \
     "# >>> SOLEN MOTD_BASH (do not edit) >>>" \
     "# <<< SOLEN MOTD_BASH (managed) <<<" \
     "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_bash.sh")"
-  if ! grep -Fq ">>> SOLEN BASH_PROFILE_INCLUDE" "$HOME/.bash_profile" 2>/dev/null; then
+  if ! grep -Fq ">>> SOLEN BASH_PROFILE_INCLUDE" "$HOME/.bash_profile" 2> /dev/null; then
     solen_insert_marker_block "$HOME/.bash_profile" \
       "# >>> SOLEN BASH_PROFILE_INCLUDE (do not edit) >>>" \
       "# <<< SOLEN BASH_PROFILE_INCLUDE (managed) <<<" \
@@ -202,10 +286,10 @@ install_starship_hook_user() {
 }
 
 install_motd_hooks_global() {
-  echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/profile.d_solen.sh")" | sudo tee /etc/profile.d/solen.sh >/dev/null
+  echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/profile.d_solen.sh")" | sudo tee /etc/profile.d/solen.sh > /dev/null
   # update-motd hook for SSH logins (Debian/Ubuntu/Proxmox)
   if [ -d /etc/update-motd.d ]; then
-    sudo tee /etc/update-motd.d/90-solen >/dev/null <<'E'
+    sudo tee /etc/update-motd.d/90-solen > /dev/null << 'E'
 #!/bin/sh
 [ -x /usr/local/bin/serverutils ] || exit 0
 [ -t 1 ] || exit 0
@@ -213,8 +297,8 @@ serverutils run motd/solen-motd -- --full
 E
     sudo chmod +x /etc/update-motd.d/90-solen
   fi
-  if command -v fish >/dev/null 2>&1; then
-    echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/conf.d_solen.fish")" | sudo tee /etc/fish/conf.d/solen.fish >/dev/null
+  if command -v fish > /dev/null 2>&1; then
+    echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/conf.d_solen.fish")" | sudo tee /etc/fish/conf.d/solen.fish > /dev/null
   fi
 }
 
@@ -336,23 +420,36 @@ for cmd in "${plan_lines[@]}"; do
   case "$cmd" in
     link\ *)
       if [[ "$scope" == "global" ]]; then link_runner_global; else link_runner_user; fi
-      changed=$((changed+1))
+      changed=$((changed + 1))
       ;;
     mkdir\ -p\ *)
-      eval "$cmd" && changed=$((changed+1)) || true
+      eval "$cmd" && changed=$((changed + 1)) || true
       ;;
     write\ /etc/profile.d/*)
-      install_motd_hooks_global; changed=$((changed+1)) ;;
+      install_motd_hooks_global
+      changed=$((changed + 1))
+      ;;
     edit\ ~/.rc*)
-      install_motd_hooks_user; changed=$((changed+1)); ;;
+      install_motd_hooks_user
+      changed=$((changed + 1))
+      ;;
     edit\ ~/.bash_profile*)
-      : ;; # install_motd_hooks_user already writes .bash_profile; avoid a second, redundant call
+      :
+      ;; # install_motd_hooks_user already writes .bash_profile; avoid a second, redundant call
     edit\ ~/.bashrc\ to\ add\ SOLEN\ Starship*)
-      install_starship_hook_user; changed=$((changed+1)); ;;
-    sudo*|./serverutils*|systemctl*|rm*|\#*)
-      set +e; bash -lc "$cmd"; rc=$?; set -e; [[ $rc -eq 0 ]] && changed=$((changed+1)) || true ;;
+      install_starship_hook_user
+      changed=$((changed + 1))
+      ;;
+    sudo* | ./serverutils* | systemctl* | rm* | \#*)
+      set +e
+      bash -lc "$cmd"
+      rc=$?
+      set -e
+      [[ $rc -eq 0 ]] && changed=$((changed + 1)) || true
+      ;;
     *)
-      : ;;
+      :
+      ;;
   esac
 done
 

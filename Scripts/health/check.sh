@@ -50,16 +50,22 @@ done
 ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
 HEALTH_CFG="${ROOT_DIR}/config/solen-health.yaml"
 
-num() { awk '{printf (NF? $1: 0)}' 2>/dev/null; }
+num() { awk '{printf (NF? $1: 0)}' 2> /dev/null; }
 thres_or() {
   # $1 key path (e.g., thresholds.disk_root_pct.warn) $2 default
   local key="$1" def="$2"
-  [[ -r "$HEALTH_CFG" ]] || { printf '%s' "$def"; return; }
-  if command -v yq >/dev/null 2>&1; then
+  [[ -r "$HEALTH_CFG" ]] || {
+    printf '%s' "$def"
+    return
+  }
+  if command -v yq > /dev/null 2>&1; then
     # translate dots to YAML path and try to read
     local val
-    val=$(yq -r ".. | select(has(\"thresholds\")) | .thresholds | .${key#thresholds.} // empty" "$HEALTH_CFG" 2>/dev/null | head -n1)
-    if [[ -n "${val:-}" && "${val}" != "null" ]]; then printf '%s' "$val"; return; fi
+    val=$(yq -r ".. | select(has(\"thresholds\")) | .thresholds | .${key#thresholds.} // empty" "$HEALTH_CFG" 2> /dev/null | head -n1)
+    if [[ -n "${val:-}" && "${val}" != "null" ]]; then
+      printf '%s' "$val"
+      return
+    fi
   fi
   awk -v key="$key" -v def="$def" '
     function trim(s){
@@ -86,20 +92,20 @@ thres_or() {
   ' "$HEALTH_CFG"
 }
 
-load15=$(awk '{print $3}' /proc/loadavg 2>/dev/null || echo 0)
-cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)
+load15=$(awk '{print $3}' /proc/loadavg 2> /dev/null || echo 0)
+cores=$(getconf _NPROCESSORS_ONLN 2> /dev/null || nproc 2> /dev/null || echo 1)
 if ! [[ "$cores" =~ ^[0-9]+$ ]]; then cores=1; fi
 load15_per_core=$(awk -v l="$load15" -v c="$cores" 'BEGIN{ if(c<1)c=1; printf "%.2f", l/c }')
 
 # memory: used percent via MemAvailable
-read mem_total_k mem_avail_k < <(awk '/MemTotal:/{t=$2} /MemAvailable:/{a=$2} END{print t, a}' /proc/meminfo 2>/dev/null)
+read mem_total_k mem_avail_k < <(awk '/MemTotal:/{t=$2} /MemAvailable:/{a=$2} END{print t, a}' /proc/meminfo 2> /dev/null)
 mem_total_m=$(awk -v k="$mem_total_k" 'BEGIN{ printf "%.0f", k/1024 }')
 mem_avail_m=$(awk -v k="$mem_avail_k" 'BEGIN{ printf "%.0f", k/1024 }')
-mem_used_m=$(( mem_total_m - mem_avail_m ))
+mem_used_m=$((mem_total_m - mem_avail_m))
 mem_pressure_pct=$(awk -v u="$mem_used_m" -v t="$mem_total_m" 'BEGIN{ if(t<=0){print 0}else{printf "%.1f", (u*100)/t} }')
 
 # disk root percent
-disk_root_pct=$(df -P -BG / 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5+0}' || echo 0)
+disk_root_pct=$(df -P -BG / 2> /dev/null | awk 'NR==2{gsub("%","",$5); print $5+0}' || echo 0)
 
 # services allow list (optional)
 services_allow=()
@@ -115,23 +121,23 @@ if [[ -r "$HEALTH_CFG" ]]; then
 fi
 
 failed_services=0
-if command -v systemctl >/dev/null 2>&1 && [[ ${#services_allow[@]} -gt 0 ]]; then
+if command -v systemctl > /dev/null 2>&1 && [[ ${#services_allow[@]} -gt 0 ]]; then
   for s in "${services_allow[@]}"; do
     [[ -z "$s" ]] && continue
-    if systemctl is-enabled --quiet "$s" 2>/dev/null; then
-      if ! systemctl is-active --quiet "$s" 2>/dev/null; then
-        failed_services=$((failed_services+1))
+    if systemctl is-enabled --quiet "$s" 2> /dev/null; then
+      if ! systemctl is-active --quiet "$s" 2> /dev/null; then
+        failed_services=$((failed_services + 1))
       fi
     fi
   done
 fi
 
 unhealthy_containers=0
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
   # grep -c already prints "0" on zero matches but still exits 1, so
   # "|| echo 0" would append a second "0" on its own line, corrupting
   # this into a two-line value that breaks the JSON output below.
-  uc=$(docker ps --format '{{.Status}}' 2>/dev/null | grep -ic '(unhealthy)' || true)
+  uc=$(docker ps --format '{{.Status}}' 2> /dev/null | grep -ic '(unhealthy)' || true)
   [[ "$uc" =~ ^[0-9]+$ ]] && unhealthy_containers="$uc"
 fi
 

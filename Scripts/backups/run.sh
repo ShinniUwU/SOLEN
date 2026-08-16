@@ -95,7 +95,11 @@ done
   exit 1
 }
 if [[ $all_profiles -eq 0 ]]; then
-  [[ -n "$profile" ]] || { solen_err "missing --profile"; usage; exit 1; }
+  [[ -n "$profile" ]] || {
+    solen_err "missing --profile"
+    usage
+    exit 1
+  }
 fi
 
 # Resolve config and dest
@@ -179,7 +183,8 @@ while IFS= read -r line; do
     SRC\ *) SRC_PATHS+=("${line#SRC }") ;;
     EXCL\ *)
       rest="${line#EXCL }"
-      pth="${rest%% *}"; pat="${rest#* }"
+      pth="${rest%% *}"
+      pat="${rest#* }"
       EXCLUDES_FOR["$pth"]+="|$pat"
       ;;
   esac
@@ -202,7 +207,7 @@ fi
 prune_planned=1
 
 use_kopia=0
-if command -v kopia >/dev/null 2>&1; then use_kopia=1; fi
+if command -v kopia > /dev/null 2>&1; then use_kopia=1; fi
 
 # Repository selection (default: filesystem repo under dest/kopia-repo)
 repo_kind="filesystem"
@@ -233,7 +238,10 @@ if [[ -z "${KOPIA_PASSWORD:-}" && -z "${KOPIA_PASSWORD_FILE:-}" ]]; then
       # pipefail must be off for this pipeline: `head` closing its stdin
       # after 32 bytes sends `tr` a SIGPIPE (exit 141), which pipefail
       # would otherwise propagate as this pipeline's status under set -e.
-      ( set +o pipefail; tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 >"$KOPIA_PASSWORD_FILE_DEFAULT" )
+      (
+        set +o pipefail
+        tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32 > "$KOPIA_PASSWORD_FILE_DEFAULT"
+      )
     fi
   fi
   export KOPIA_PASSWORD_FILE="$KOPIA_PASSWORD_FILE_DEFAULT"
@@ -245,7 +253,8 @@ if [[ $use_kopia -eq 1 ]]; then
   # choose sudo for filesystem repo in /var*
   use_sudo=0
   if [[ "$repo_kind" == "filesystem" ]] && [[ "$repo_path" == /var/* ]]; then use_sudo=1; fi
-  SUDO=""; [[ $use_sudo -eq 1 ]] && SUDO="sudo -E"
+  SUDO=""
+  [[ $use_sudo -eq 1 ]] && SUDO="sudo -E"
 
   pw_file_q="$(printf '%q' "${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}")"
   if [[ "$repo_kind" == "filesystem" ]]; then
@@ -258,7 +267,8 @@ if [[ $use_kopia -eq 1 ]]; then
       actions_list+="# ERROR: missing SOLEN_KOPIA_S3_REGION or AWS_REGION for S3 repo"$'\n'
     fi
     region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"
-    endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=$(printf '%q' "${SOLEN_KOPIA_S3_ENDPOINT}")"
+    endpoint_opt=""
+    [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=$(printf '%q' "${SOLEN_KOPIA_S3_ENDPOINT}")"
     bucket_q="$(printf '%q' "${SOLEN_KOPIA_S3_BUCKET}")"
     prefix_q="$(printf '%q' "${SOLEN_KOPIA_S3_PREFIX:-solen}")"
     region_q="$(printf '%q' "$region")"
@@ -301,7 +311,7 @@ fi
 if [[ "$cmd" == "run" ]]; then
   if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
     rollup="would back up ${#SRC_PATHS[@]} source(s) using $([[ $use_kopia -eq 1 ]] && echo kopia || echo scaffold), would prune ${prune_planned}"
-    echo "would change $(( ${#SRC_PATHS[@]} + prune_planned + 1 )) items"
+    echo "would change $((${#SRC_PATHS[@]} + prune_planned + 1)) items"
     if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
       if [[ ${policy_denied_profile:-0} -eq 1 || ${policy_denied_dest:-0} -eq 1 ]]; then
         solen_json_record warn "policy would refuse backup (dry-run)" "$actions_list" "\"metrics\":{\"sources\":${#SRC_PATHS[@]},\"prune_planned\":${prune_planned}}"
@@ -341,7 +351,7 @@ if [[ "$cmd" == "run" ]]; then
       bash -c "$line"
       rc=$?
       set -e
-      if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
+      if [[ $rc -eq 0 ]]; then changed=$((changed + 1)); else solen_warn "step failed (rc=$rc): $line"; fi
     done <<< "$actions_list"
     # Post-run: verify snapshots exist (best-effort)
     for src in "${SRC_PATHS[@]}"; do
@@ -351,10 +361,10 @@ if [[ "$cmd" == "run" ]]; then
       else
         SUDO=""
       fi
-      $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" >/dev/null 2>&1
+      $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" > /dev/null 2>&1
       rc=$?
       set -e
-      if [[ $rc -eq 0 ]]; then verified=$((verified+1)); fi
+      if [[ $rc -eq 0 ]]; then verified=$((verified + 1)); fi
     done
     summary="backup complete (kopia)"
     if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
@@ -377,7 +387,7 @@ elif [[ "$cmd" == "prune" ]]; then
   else
     if [[ $use_kopia -eq 1 ]]; then
       # Run maintenance full
-      if grep -q '^\s*kopia maintenance' <<<"$actions_list"; then
+      if grep -q '^\s*kopia maintenance' <<< "$actions_list"; then
         set +e
         bash -c "$(printf '%s\n' "$actions_list" | grep -m1 'kopia maintenance' || true)"
         rc=$?
@@ -400,43 +410,59 @@ elif [[ "$cmd" == "prune" ]]; then
 elif [[ "$cmd" == "verify" ]]; then
   if [[ $all_profiles -eq 1 ]]; then
     # list profile names from YAML
-    mapfile -t PROFILES < <(awk '/^[[:space:]]*-[[:space:]]*name:/{print $3}' "$cfg_path" | sed 's/"//g' )
-    ok_total=0; src_total=0; actions=""
+    mapfile -t PROFILES < <(awk '/^[[:space:]]*-[[:space:]]*name:/{print $3}' "$cfg_path" | sed 's/"//g')
+    ok_total=0
+    src_total=0
+    actions=""
     for p in "${PROFILES[@]}"; do
       profile="$p"
       # Recompute sources for each profile
-      SRC_PATHS=(); EXCLUDES_FOR=(); DEFAULT_EXCLUDES=()
+      SRC_PATHS=()
+      EXCLUDES_FOR=()
+      DEFAULT_EXCLUDES=()
       while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         case "$line" in
           DEFEXCL\ *) DEFAULT_EXCLUDES+=("${line#DEFEXCL }") ;;
           SRC\ *) SRC_PATHS+=("${line#SRC }") ;;
-          EXCL\ *) rest="${line#EXCL }"; pth="${rest%% *}"; pat="${rest#* }"; EXCLUDES_FOR["$pth"]+="|$pat" ;;
+          EXCL\ *)
+            rest="${line#EXCL }"
+            pth="${rest%% *}"
+            pat="${rest#* }"
+            EXCLUDES_FOR["$pth"]+="|$pat"
+            ;;
         esac
       done < <(parse_profile_yaml)
       # Verify each source
-      if command -v kopia >/dev/null 2>&1; then
-        SUDO=""; if [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]]; then SUDO="sudo -E"; fi
+      if command -v kopia > /dev/null 2>&1; then
+        SUDO=""
+        if [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]]; then SUDO="sudo -E"; fi
         if [[ "$repo_kind" == filesystem ]]; then
-          $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect filesystem --path "$repo_path" >/dev/null 2>&1 || true
+          $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect filesystem --path "$repo_path" > /dev/null 2>&1 || true
         else
-          region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"; endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
-          env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect s3 --bucket "${SOLEN_KOPIA_S3_BUCKET}" --prefix "${SOLEN_KOPIA_S3_PREFIX:-solen}${repo_per_profile:+/${profile}}" --region "$region"${endpoint_opt} >/dev/null 2>&1 || true
+          region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"
+          endpoint_opt=""
+          [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
+          env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect s3 --bucket "${SOLEN_KOPIA_S3_BUCKET}" --prefix "${SOLEN_KOPIA_S3_PREFIX:-solen}${repo_per_profile:+/${profile}}" --region "$region"${endpoint_opt} > /dev/null 2>&1 || true
         fi
       fi
       prof_ok=0
       for src in "${SRC_PATHS[@]}"; do
-        src_total=$((src_total+1))
-        latest=$(env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" --json 2>/dev/null | jq -r '.[0].startTime' 2>/dev/null || true)
-        if [[ -n "$latest" && "$latest" != "null" ]]; then prof_ok=$((prof_ok+1)); actions+=$"OK  [$profile] $src -> $latest\n"; else actions+=$"MISS [$profile] $src\n"; fi
+        src_total=$((src_total + 1))
+        latest=$(env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" --json 2> /dev/null | jq -r '.[0].startTime' 2> /dev/null || true)
+        if [[ -n "$latest" && "$latest" != "null" ]]; then
+          prof_ok=$((prof_ok + 1))
+          actions+=$"OK  [$profile] $src -> $latest\n"
+        else actions+=$"MISS [$profile] $src\n"; fi
       done
-      ok_total=$((ok_total+prof_ok))
+      ok_total=$((ok_total + prof_ok))
     done
     summary="verify ${ok_total}/${src_total} sources have snapshots across profiles"
     if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
       solen_json_record ok "$summary" "$actions" "\"metrics\":{\"sources\":${src_total},\"ok\":${ok_total}}"
     else
-      printf '%s\n' "$actions"; solen_ok "$summary"
+      printf '%s\n' "$actions"
+      solen_ok "$summary"
     fi
     exit 0
   fi
@@ -444,24 +470,32 @@ elif [[ "$cmd" == "verify" ]]; then
   if [[ $SOLEN_FLAG_JSON -ne 1 ]]; then
     solen_info "verifying snapshots for ${#SRC_PATHS[@]} source(s)"
   fi
-  if ! command -v kopia >/dev/null 2>&1; then
+  if ! command -v kopia > /dev/null 2>&1; then
     solen_err "kopia not installed"
     [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "kopia not installed" "" "\"code\":2"
     exit 2
   fi
   # Connect repo if needed (same as run planning, without create)
-  SUDO=""; if [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]]; then SUDO="sudo -E"; fi
+  SUDO=""
+  if [[ "$repo_kind" == filesystem && "$repo_path" == /var/* ]]; then SUDO="sudo -E"; fi
   if [[ "$repo_kind" == filesystem ]]; then
-    $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect filesystem --path "$repo_path" >/dev/null 2>&1 || true
+    $SUDO env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect filesystem --path "$repo_path" > /dev/null 2>&1 || true
   else
-    region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"; endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
-    env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect s3 --bucket "${SOLEN_KOPIA_S3_BUCKET}" --prefix "${SOLEN_KOPIA_S3_PREFIX:-solen}${repo_per_profile:+/${profile}}" --region "$region"${endpoint_opt} >/dev/null 2>&1 || true
+    region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"
+    endpoint_opt=""
+    [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
+    env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia repository connect s3 --bucket "${SOLEN_KOPIA_S3_BUCKET}" --prefix "${SOLEN_KOPIA_S3_PREFIX:-solen}${repo_per_profile:+/${profile}}" --region "$region"${endpoint_opt} > /dev/null 2>&1 || true
   fi
-  ok=0; total=0; actions=""
+  ok=0
+  total=0
+  actions=""
   for src in "${SRC_PATHS[@]}"; do
-    total=$((total+1))
-    latest=$(env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" --json 2>/dev/null | jq -r '.[0].startTime' 2>/dev/null || true)
-    if [[ -n "$latest" && "$latest" != "null" ]]; then ok=$((ok+1)); actions+=$"OK  $src -> $latest\n"; else actions+=$"MISS $src\n"; fi
+    total=$((total + 1))
+    latest=$(env KOPIA_PASSWORD_FILE="${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}" kopia snapshot list "$src" --json 2> /dev/null | jq -r '.[0].startTime' 2> /dev/null || true)
+    if [[ -n "$latest" && "$latest" != "null" ]]; then
+      ok=$((ok + 1))
+      actions+=$"OK  $src -> $latest\n"
+    else actions+=$"MISS $src\n"; fi
   done
   summary="verify ${ok}/${total} sources have snapshots"
   if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then

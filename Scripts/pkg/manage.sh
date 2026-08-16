@@ -39,12 +39,28 @@ CMD="${1:-}"
 shift || true
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --manager) MANAGER="${2:-auto}"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    --manager)
+      MANAGER="${2:-auto}"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) shift ;;
   esac
 done
@@ -166,7 +182,7 @@ case "$CMD" in
   check)
     [[ "$mgr" == "apt" ]] && pkg_check_apt || pkg_check_dnf
     ;;
-  update|upgrade|autoremove)
+  update | upgrade | autoremove)
     [[ "$mgr" == "apt" ]] && pkg_run_apt "$CMD" || pkg_run_dnf "$CMD"
     ;;
   "")

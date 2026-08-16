@@ -28,10 +28,29 @@ EOF
 }
 
 do_install=1
-if [[ "${1:-}" == "--uninstall" ]]; then do_install=0; shift; fi
+if [[ "${1:-}" == "--uninstall" ]]; then
+  do_install=0
+  shift
+fi
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
-  case "$1" in -h|--help) usage; exit 0 ;; --) shift; break ;; -*) solen_err "unknown: $1"; usage; exit 1 ;; *) break;; esac
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
+  case "$1" in -h | --help)
+    usage
+    exit 0
+    ;;
+  --)
+    shift
+    break
+    ;;
+  -*)
+    solen_err "unknown: $1"
+    usage
+    exit 1
+    ;;
+  *) break ;; esac
 done
 
 pm_detect || true
@@ -80,7 +99,7 @@ for line in "${actions[@]}"; do
   bash -lc "$line"
   rc=$?
   set -e
-  if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed rc=$rc: $line"; fi
+  if [[ $rc -eq 0 ]]; then changed=$((changed + 1)); else solen_warn "step failed rc=$rc: $line"; fi
 done
 
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
@@ -89,4 +108,3 @@ else
   solen_ok "$summary (changed=${changed})"
 fi
 exit 0
-

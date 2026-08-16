@@ -39,25 +39,58 @@ dest=""
 version="${KOPIA_VERSION:-}"
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --method) method="${2:-auto}"; shift 2 ;;
-    --dest) dest="${2:-}"; shift 2 ;;
-    --version) version="${2:-}"; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    --method)
+      method="${2:-auto}"
+      shift 2
+      ;;
+    --dest)
+      dest="${2:-}"
+      shift 2
+      ;;
+    --version)
+      version="${2:-}"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) break ;;
   esac
 done
 
 pick_method() {
   case "$method" in
-    apt|dnf|binary) echo "$method" ; return ;;
+    apt | dnf | binary)
+      echo "$method"
+      return
+      ;;
     auto)
-      if command -v apt >/dev/null 2>&1; then echo apt; return; fi
-      if command -v dnf >/dev/null 2>&1; then echo dnf; return; fi
-      echo binary; return ;;
+      if command -v apt > /dev/null 2>&1; then
+        echo apt
+        return
+      fi
+      if command -v dnf > /dev/null 2>&1; then
+        echo dnf
+        return
+      fi
+      echo binary
+      return
+      ;;
     *) echo binary ;;
   esac
 }
@@ -66,7 +99,7 @@ chosen="$(pick_method)"
 
 # Destination selection for binary install
 if [[ -z "$dest" ]]; then
-  if [[ ${EUID:-$(id -u 2>/dev/null || echo 1000)} -eq 0 ]]; then dest="/usr/local/bin"; else dest="${HOME}/.local/bin"; fi
+  if [[ ${EUID:-$(id -u 2> /dev/null || echo 1000)} -eq 0 ]]; then dest="/usr/local/bin"; else dest="${HOME}/.local/bin"; fi
 fi
 
 arch() {
@@ -76,7 +109,7 @@ arch() {
 latest_version_cmd='curl -fsSL https://api.github.com/repos/kopia/kopia/releases/latest | sed -n "s/^  \"tag_name\": \"\\(.*\\)\",$/\1/p"'
 if [[ -z "$version" && "$chosen" == "binary" ]]; then
   version_cmd="$latest_version_cmd"
-  version_line=$(bash -c "$version_cmd" 2>/dev/null || true)
+  version_line=$(bash -c "$version_cmd" 2> /dev/null || true)
   if [[ -n "$version_line" ]]; then version="$version_line"; fi
 fi
 [[ -n "$version" ]] || version="v0.17.0"
@@ -133,7 +166,7 @@ while IFS= read -r line; do
   bash -c "$line"
   rc=$?
   set -e
-  if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed (rc=$rc): $line"; fi
+  if [[ $rc -eq 0 ]]; then changed=$((changed + 1)); else solen_warn "step failed (rc=$rc): $line"; fi
 done <<< "$actions"
 
 if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
@@ -142,4 +175,3 @@ else
   solen_ok "$summary (changed=${changed})"
 fi
 exit 0
-

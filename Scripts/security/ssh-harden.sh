@@ -50,20 +50,60 @@ permit_empty=""
 do_rollback=0
 
 while [[ $# -gt 0 ]]; do
-  if solen_parse_common_flag "$1"; then shift; continue; fi
+  if solen_parse_common_flag "$1"; then
+    shift
+    continue
+  fi
   case "$1" in
-    --port) port="${2:-}"; shift 2 ;;
-    --permit-root) permit_root="${2:-no}"; shift 2 ;;
-    --password-auth) password_auth="${2:-no}"; shift 2 ;;
-    --allow-groups) allow_groups="${2:-}"; shift 2 ;;
-    --max-auth-tries) max_auth_tries="${2:-}"; shift 2 ;;
-    --permit-empty-passwords) permit_empty="${2:-no}"; shift 2 ;;
-    --skip-preflight) skip_preflight=1; shift ;;
-    --rollback) do_rollback=1; shift ;;
-    --restart) do_restart=1; shift ;;
-    -h|--help) usage; exit 0 ;;
-    --) shift; break ;;
-    -*) solen_err "unknown option: $1"; usage; exit 1 ;;
+    --port)
+      port="${2:-}"
+      shift 2
+      ;;
+    --permit-root)
+      permit_root="${2:-no}"
+      shift 2
+      ;;
+    --password-auth)
+      password_auth="${2:-no}"
+      shift 2
+      ;;
+    --allow-groups)
+      allow_groups="${2:-}"
+      shift 2
+      ;;
+    --max-auth-tries)
+      max_auth_tries="${2:-}"
+      shift 2
+      ;;
+    --permit-empty-passwords)
+      permit_empty="${2:-no}"
+      shift 2
+      ;;
+    --skip-preflight)
+      skip_preflight=1
+      shift
+      ;;
+    --rollback)
+      do_rollback=1
+      shift
+      ;;
+    --restart)
+      do_restart=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      solen_err "unknown option: $1"
+      usage
+      exit 1
+      ;;
     *) break ;;
   esac
 done
@@ -80,13 +120,14 @@ fi
 
 # Rollback: restore latest backup and exit
 if [[ $do_rollback -eq 1 ]]; then
-  latest="$(ls -1t /etc/ssh/sshd_config.*.bak 2>/dev/null | head -n1 || true)"
+  latest="$(ls -1t /etc/ssh/sshd_config.*.bak 2> /dev/null | head -n1 || true)"
   if [[ -z "$latest" ]]; then
     solen_err "no backup files found to rollback"
     [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "no backup for rollback" "" "\"code\":2"
     exit 2
   fi
-  actions=$(cat <<A
+  actions=$(
+    cat << A
 sudo install -m 0644 "$latest" "/etc/ssh/sshd_config"
 if systemctl status ssh >/dev/null 2>&1; then sudo systemctl reload ssh || sudo systemctl restart ssh; else sudo systemctl reload sshd || sudo systemctl restart sshd; fi
 A
@@ -108,7 +149,7 @@ A
     bash -c "$line"
     rc=$?
     set -e
-    if [[ $rc -eq 0 ]]; then changed=$((changed+1)); else solen_warn "step failed rc=$rc: $line"; fi
+    if [[ $rc -eq 0 ]]; then changed=$((changed + 1)); else solen_warn "step failed rc=$rc: $line"; fi
   done <<< "$actions"
   if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
     solen_json_record ok "rollback applied" "$actions" "\"changed\":${changed},\"rolled_back\":true"
@@ -119,7 +160,11 @@ A
 fi
 
 conf="/etc/ssh/sshd_config"
-[[ -r "$conf" ]] || { solen_err "not readable: $conf"; [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "missing sshd_config" "" "\"code\":2"; exit 2; }
+[[ -r "$conf" ]] || {
+  solen_err "not readable: $conf"
+  [[ $SOLEN_FLAG_JSON -eq 1 ]] && solen_json_record error "missing sshd_config" "" "\"code\":2"
+  exit 2
+}
 
 ts="$(date -u +%Y%m%d-%H%M%S)"
 tmp="$(mktemp -t solen.sshd_config.XXXXXX)"
@@ -158,7 +203,10 @@ if [[ $SOLEN_FLAG_DRYRUN -eq 0 && $SOLEN_FLAG_YES -eq 1 && $skip_preflight -eq 0
     sudo sh -c "test -s '$f' && grep -vE '^(#|\s*$)' '$f' >/dev/null 2>&1"
     rc=$?
     set -e
-    if [[ $rc -eq 0 ]]; then keys_ok=1; break; fi
+    if [[ $rc -eq 0 ]]; then
+      keys_ok=1
+      break
+    fi
   done
   if [[ $keys_ok -ne 1 ]]; then
     msg="preflight failed: disabling password auth but no non-empty authorized_keys found (use --skip-preflight to override)"
@@ -173,7 +221,8 @@ if [[ $SOLEN_FLAG_DRYRUN -eq 0 && $SOLEN_FLAG_YES -eq 1 && $skip_preflight -eq 0
 fi
 
 # Build actions script (for dry-run display)
-actions=$(cat <<A
+actions=$(
+  cat << A
 sudo cp "$conf" "$backup"
 sudo install -m 0644 "$tmp" "$conf"
 test -x /usr/sbin/sshd && sudo /usr/sbin/sshd -t -f "$tmp"
@@ -196,7 +245,7 @@ done
 
 # Validate prospective config (skip in dry-run to avoid sudo prompts)
 if [[ $SOLEN_FLAG_DRYRUN -eq 0 && $SOLEN_FLAG_YES -eq 1 ]]; then
-  if command -v sshd >/dev/null 2>&1; then
+  if command -v sshd > /dev/null 2>&1; then
     set +e
     sudo sshd -t -f "$tmp"
     rc=$?
@@ -243,7 +292,7 @@ if [[ $do_restart -eq 1 ]]; then
   if ! systemctl list-unit-files | grep -q '^ssh\.service'; then svc="sshd"; fi
   if solen_policy_allows_service_restart "$svc"; then
     set +e
-    if systemctl status "$svc" >/dev/null 2>&1; then
+    if systemctl status "$svc" > /dev/null 2>&1; then
       sudo systemctl reload "$svc" || sudo systemctl restart "$svc"
     else
       sudo systemctl restart "$svc"

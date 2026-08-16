@@ -4,10 +4,14 @@
 __SOLEN_PM="unknown"
 
 pm_detect() {
-  if command -v apt-get >/dev/null 2>&1; then __SOLEN_PM=apt
-  elif command -v dnf >/dev/null 2>&1; then __SOLEN_PM=dnf
-  elif command -v pacman >/dev/null 2>&1; then __SOLEN_PM=pacman
-  elif command -v zypper >/dev/null 2>&1; then __SOLEN_PM=zypper
+  if command -v apt-get > /dev/null 2>&1; then
+    __SOLEN_PM=apt
+  elif command -v dnf > /dev/null 2>&1; then
+    __SOLEN_PM=dnf
+  elif command -v pacman > /dev/null 2>&1; then
+    __SOLEN_PM=pacman
+  elif command -v zypper > /dev/null 2>&1; then
+    __SOLEN_PM=zypper
   else __SOLEN_PM=unknown; fi
   return 0
 }
@@ -40,16 +44,19 @@ pm_install_plan() {
 pm_check_updates_count() {
   case "$__SOLEN_PM" in
     apt)
-      if command -v apt-get >/dev/null 2>&1; then
-        (apt-get -s upgrade 2>/dev/null | awk '/^Inst /{c++} END{print c+0}') || echo 0
-      else echo 0; fi ;;
+      if command -v apt-get > /dev/null 2>&1; then
+        (apt-get -s upgrade 2> /dev/null | awk '/^Inst /{c++} END{print c+0}') || echo 0
+      else echo 0; fi
+      ;;
     dnf)
-      (dnf -q check-update 2>/dev/null | awk 'END{print NR+0}') || echo 0 ;;
+      (dnf -q check-update 2> /dev/null | awk 'END{print NR+0}') || echo 0
+      ;;
     pacman)
-      (checkupdates 2>/dev/null | wc -l | tr -d ' ') || echo 0 ;;
+      (checkupdates 2> /dev/null | wc -l | tr -d ' ') || echo 0
+      ;;
     zypper)
-      (zypper -q list-updates 2>/dev/null | awk 'NR>2{c++} END{print c+0}') || echo 0 ;;
+      (zypper -q list-updates 2> /dev/null | awk 'NR>2{c++} END{print c+0}') || echo 0
+      ;;
     *) echo 0 ;;
   esac
 }
-

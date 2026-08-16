@@ -29,7 +29,7 @@ _DEFAULT_LOG_DIR_USER="${HOME}/.local/share/solen"
 _DEFAULT_LOG_DIR_SYSTEM="/var/log/solen"
 _BASE_LOG_DIR="${SOLEN_LOG_DIR:-}"
 if [[ -z "${_BASE_LOG_DIR}" ]]; then
-  if [[ ${EUID:-$(id -u 2>/dev/null || echo 1000)} -eq 0 ]]; then
+  if [[ ${EUID:-$(id -u 2> /dev/null || echo 1000)} -eq 0 ]]; then
     _BASE_LOG_DIR="${_DEFAULT_LOG_DIR_SYSTEM}"
   else
     _BASE_LOG_DIR="${_DEFAULT_LOG_DIR_USER}"
@@ -70,10 +70,13 @@ ensure_audit() {
 audit_log() {
   # message
   ensure_audit
-  echo "$(timestamp) $*" >>"${AUDIT_LOG}"
+  echo "$(timestamp) $*" >> "${AUDIT_LOG}"
 }
 
-die() { echoerr "$*"; exit 1; }
+die() {
+  echoerr "$*"
+  exit 1
+}
 
 find_alternate_root() {
   # Search common persistent roots for a valid copy
@@ -95,9 +98,10 @@ find_alternate_root() {
       local sub
       while IFS= read -r sub; do
         if [[ -x "$sub/serverutils" && -d "$sub/Scripts" ]]; then
-          echo "$sub"; return 0
+          echo "$sub"
+          return 0
         fi
-      done < <(find "$c" -maxdepth 2 -type f -name serverutils -printf '%h\n' 2>/dev/null || true)
+      done < <(find "$c" -maxdepth 2 -type f -name serverutils -printf '%h\n' 2> /dev/null || true)
     fi
   done
   return 1
@@ -131,7 +135,7 @@ read_meta() {
   local line
   # Read first 80 lines only
   local head
-  head=$(head -n 80 "$file" 2>/dev/null || true)
+  head=$(head -n 80 "$file" 2> /dev/null || true)
   while IFS= read -r line; do
     if [[ $in -eq 0 ]]; then
       [[ "$line" =~ ^#\ SOLEN-META: ]] && in=1 && continue
@@ -176,16 +180,26 @@ meta_to_json_fields() {
   _esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
   # lists: split on comma into JSON array
   _arr() {
-    local s="$1"; s="${s#,}"; s="${s%,}"
-    if [[ -z "$s" ]]; then echo '[]'; return; fi
-    local IFS=','; read -r -a a <<< "$s" || true
-    local i=0; local out="["
+    local s="$1"
+    s="${s#,}"
+    s="${s%,}"
+    if [[ -z "$s" ]]; then
+      echo '[]'
+      return
+    fi
+    local IFS=','
+    read -r -a a <<< "$s" || true
+    local i=0
+    local out="["
     for it in "${a[@]}"; do
-      local t="${it## }"; t="${t%% }"
+      local t="${it## }"
+      t="${t%% }"
       [[ $i -gt 0 ]] && out+=" ,"
-      out+="\"$(_esc "$t")\""; i=$((i+1))
+      out+="\"$(_esc "$t")\""
+      i=$((i + 1))
     done
-    out+="]"; echo "$out"
+    out+="]"
+    echo "$out"
   }
   printf '"meta":{"summary":"%s","requires":"%s","tags":%s,"verbs":%s,"outputs":"%s","root":"%s","since":"%s","breaking":"%s","alias":"%s"}' \
     "$(_esc "${summary:-}")" "$(_esc "${requires:-}")" "$(_arr "${tags:-}")" "$(_arr "${verbs:-}")" "$(_esc "${outputs:-}")" "$(_esc "${root:-}")" "$(_esc "${since:-}")" "$(_esc "${breaking:-}")" "$(_esc "${alias:-}")"
@@ -247,7 +261,7 @@ cmd_overview() {
   echoinfo "Environment summary"
   local tools=(docker docker-compose apt dnf systemctl journalctl ss ip rsync)
   for t in "${tools[@]}"; do
-    if command -v "$t" >/dev/null 2>&1; then
+    if command -v "$t" > /dev/null 2>&1; then
       echo "  ✓ $t"
     else
       echo "  - $t (missing)"
@@ -257,8 +271,9 @@ cmd_overview() {
   echoinfo "Scripts by category"
   declare -A counts
   while IFS= read -r f; do
-    local rel="${f#${SCRIPTS_DIR}/}"; local cat="$(dirname "$rel")"
-    counts["$cat"]=$(( ${counts["$cat"]:-0} + 1 ))
+    local rel="${f#${SCRIPTS_DIR}/}"
+    local cat="$(dirname "$rel")"
+    counts["$cat"]=$((${counts["$cat"]:-0} + 1))
   done < <(find_all_scripts)
   for c in "${!counts[@]}"; do
     echo "  - $c: ${counts[$c]}"
@@ -275,12 +290,15 @@ cmd_home() {
   # If TTY and not disabled, show a simple interactive menu
   if { [[ -t 1 ]] || [[ "${FORCE_TUI:-0}" == "1" ]]; } && [[ "${SOLEN_NO_TUI:-0}" != "1" ]]; then
     while true; do
-      command -v clear >/dev/null 2>&1 && clear || true
-      [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && { sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"; echo; }
+      command -v clear > /dev/null 2>&1 && clear || true
+      [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && {
+        sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"
+        echo
+      }
       local _motd_rc
       case "${SHELL##*/}" in zsh) _motd_rc="$HOME/.zshrc" ;; fish) _motd_rc="$HOME/.config/fish/config.fish" ;; *) _motd_rc="$HOME/.bashrc" ;; esac
       local _motd_configured=0
-      { grep -q 'solen-motd' "$_motd_rc" 2>/dev/null || grep -q 'solen-motd' /etc/profile.d/solen-motd.sh 2>/dev/null || [[ -f /etc/update-motd.d/90-solen ]]; } && _motd_configured=1
+      { grep -q 'solen-motd' "$_motd_rc" 2> /dev/null || grep -q 'solen-motd' /etc/profile.d/solen-motd.sh 2> /dev/null || [[ -f /etc/update-motd.d/90-solen ]]; } && _motd_configured=1
       echo "SOLEN Runner — choose an action:"
       echo "  1) List scripts (then run)"
       echo "  2) Search scripts (then run)"
@@ -342,7 +360,7 @@ cmd_home() {
             fi
           fi
           ;;
-        r|R)
+        r | R)
           printf "Enter key/name to run: "
           read -r runkey
           if [[ -n "$runkey" ]]; then
@@ -367,16 +385,17 @@ cmd_home() {
             fi
           fi
           ;;
-        3) cmd_run health/check || true; ;;
-        4) cmd_run system-maintenance/update-and-report -- --dry-run || true; ;;
-        5) cmd_install_runner --user || true; ;;
-        6) cmd_overview || true; ;;
-        7) cmd_setup_motd || true; ;;
-        q|Q|"" ) break ;;
+        3) cmd_run health/check || true ;;
+        4) cmd_run system-maintenance/update-and-report -- --dry-run || true ;;
+        5) cmd_install_runner --user || true ;;
+        6) cmd_overview || true ;;
+        7) cmd_setup_motd || true ;;
+        q | Q | "") break ;;
         *) echoerr "Unknown choice" ;;
       esac
       echo
-      printf "Press Enter to return to menu..."; read -r _discard || true
+      printf "Press Enter to return to menu..."
+      read -r _discard || true
     done
   else
     show_help
@@ -387,9 +406,15 @@ cmd_list() {
   local json=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --json) json=1; shift ;;
-      --long|-l) shift ;; # summaries are shown by default in text mode
-      *) echoerr "Unknown option for list: $1"; exit 2 ;;
+      --json)
+        json=1
+        shift
+        ;;
+      --long | -l) shift ;; # summaries are shown by default in text mode
+      *)
+        echoerr "Unknown option for list: $1"
+        exit 2
+        ;;
     esac
   done
   if [[ $json -eq 1 ]]; then
@@ -446,7 +471,7 @@ choose_interactively() {
     local key
     key="$(script_key_for "$it")"
     printf "  [%d] %s (%s)\n" "$i" "$key" "$it"
-    i=$((i+1))
+    i=$((i + 1))
   done
   printf "Select [1-%d] (blank cancels): " "$count"
   local sel
@@ -455,11 +480,11 @@ choose_interactively() {
     echowarn "Selection canceled"
     return 2
   fi
-  if ! [[ "$sel" =~ ^[0-9]+$ ]] || (( sel < 1 || sel > count )); then
+  if ! [[ "$sel" =~ ^[0-9]+$ ]] || ((sel < 1 || sel > count)); then
     echoerr "Invalid selection"
     return 2
   fi
-  printf '%s\n' "${items[$((sel-1))]}"
+  printf '%s\n' "${items[$((sel - 1))]}"
 }
 
 cmd_run() {
@@ -468,11 +493,26 @@ cmd_run() {
   # Split runner args and script args by --
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --json) json=1; shift ;;
-      --dry-run) dry_run=1; shift ;;
-      --) shift; break ;;
-      -*) echoerr "Unknown option for run: $1"; exit 2 ;;
-      *) query="$1"; shift ;;
+      --json)
+        json=1
+        shift
+        ;;
+      --dry-run)
+        dry_run=1
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        echoerr "Unknown option for run: $1"
+        exit 2
+        ;;
+      *)
+        query="$1"
+        shift
+        ;;
     esac
   done
   local script_args=("$@")
@@ -491,7 +531,7 @@ cmd_run() {
   [[ -x "$resolved" ]] || chmod +x "$resolved" || true
   local key
   key="$(script_key_for "$resolved")"
-  audit_log "RUN key=${key} path=${resolved} args=$(printf '%q ' "${script_args[@]}" ) user=${USER:-unknown}"
+  audit_log "RUN key=${key} path=${resolved} args=$(printf '%q ' "${script_args[@]}") user=${USER:-unknown}"
 
   if [[ $dry_run -eq 1 ]]; then
     if [[ "${SOLEN_RUN_QUIET:-0}" != "1" ]]; then
@@ -536,8 +576,14 @@ cmd_search() {
   local json=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --json) json=1; shift ;;
-      *) query="$1"; shift ;;
+      --json)
+        json=1
+        shift
+        ;;
+      *)
+        query="$1"
+        shift
+        ;;
     esac
   done
   [[ -n "$query" ]] || die "Usage: serverutils search <query> [--json]"
@@ -594,17 +640,31 @@ cmd_install_runner() {
   local explicit=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --global) scope="global"; shift ;;
-      --user) scope="user"; shift ;;
-      --force) force=1; shift ;;
+      --global)
+        scope="global"
+        shift
+        ;;
+      --user)
+        scope="user"
+        shift
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
       --name)
         explicit=1
         names=("$2")
-        shift 2 ;;
+        shift 2
+        ;;
       --alias)
         names+=("$2")
-        shift 2 ;;
-      *) echoerr "Unknown option: $1"; exit 2 ;;
+        shift 2
+        ;;
+      *)
+        echoerr "Unknown option: $1"
+        exit 2
+        ;;
     esac
   done
   # dedupe names
@@ -656,11 +716,26 @@ cmd_install_scripts() {
   local scope="user" prefix="su-" force=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --global) scope="global"; shift ;;
-      --user) scope="user"; shift ;;
-      --prefix) prefix="$2"; shift 2 ;;
-      --force) force=1; shift ;;
-      *) echoerr "Unknown option: $1"; exit 2 ;;
+      --global)
+        scope="global"
+        shift
+        ;;
+      --user)
+        scope="user"
+        shift
+        ;;
+      --prefix)
+        prefix="$2"
+        shift 2
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
+      *)
+        echoerr "Unknown option: $1"
+        exit 2
+        ;;
     esac
   done
   local bindir
@@ -675,7 +750,8 @@ cmd_install_scripts() {
     local key
     key="$(script_key_for "$f")"
     local cat name
-    cat="${key%/*}"; name="${key##*/}"
+    cat="${key%/*}"
+    name="${key##*/}"
     local link="$bindir/${prefix}${cat//\//-}-${name}"
     if [[ -e "$link" ]] && [[ $force -eq 0 ]]; then
       echowarn "Exists (skip): $link"
@@ -687,7 +763,7 @@ cmd_install_scripts() {
     else
       ln -s "$f" "$link"
     fi
-    count=$((count+1))
+    count=$((count + 1))
   done < <(find_all_scripts)
   echook "Installed $count script symlinks into $bindir (prefix='${prefix}')"
   audit_log "INSTALL_SCRIPTS scope=${scope} dir=${bindir} prefix=${prefix} user=${USER:-unknown} count=${count}"
@@ -702,10 +778,22 @@ cmd_uninstall_scripts() {
   local scope="user" prefix="su-"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --global) scope="global"; shift ;;
-      --user) scope="user"; shift ;;
-      --prefix) prefix="$2"; shift 2 ;;
-      *) echoerr "Unknown option: $1"; exit 2 ;;
+      --global)
+        scope="global"
+        shift
+        ;;
+      --user)
+        scope="user"
+        shift
+        ;;
+      --prefix)
+        prefix="$2"
+        shift 2
+        ;;
+      *)
+        echoerr "Unknown option: $1"
+        exit 2
+        ;;
     esac
   done
   local bindir
@@ -725,7 +813,7 @@ cmd_uninstall_scripts() {
         else
           rm -f "$f" || true
         fi
-        removed=$((removed+1))
+        removed=$((removed + 1))
       fi
     done < <(find "$bindir" -maxdepth 1 -type l -print)
   fi
@@ -737,10 +825,22 @@ cmd_install_units() {
   local scope="user" force=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --global) scope="global"; shift ;;
-      --user) scope="user"; shift ;;
-      --force) force=1; shift ;;
-      *) echoerr "Unknown option: $1"; exit 2 ;;
+      --global)
+        scope="global"
+        shift
+        ;;
+      --user)
+        scope="user"
+        shift
+        ;;
+      --force)
+        force=1
+        shift
+        ;;
+      *)
+        echoerr "Unknown option: $1"
+        exit 2
+        ;;
     esac
   done
   local dest
@@ -761,8 +861,8 @@ cmd_install_units() {
     fi
     if [[ "$scope" == "global" ]]; then
       sed -e 's#append:%h/.local/share/solen#append:/var/log/solen#g' \
-          -e '/^ExecStartPre=.*mkdir -p/s#%h/.local/share/solen#/var/log/solen#' \
-          "$f" > "$target.tmp"
+        -e '/^ExecStartPre=.*mkdir -p/s#%h/.local/share/solen#/var/log/solen#' \
+        "$f" > "$target.tmp"
       if ! grep -q '^ExecStartPre=.*/var/log/solen' "$target.tmp"; then
         awk '1; $0=="[Service]" {print "ExecStartPre=/usr/bin/env mkdir -p /var/log/solen"}' "$target.tmp" > "$target"
         rm -f "$target.tmp"
@@ -772,7 +872,7 @@ cmd_install_units() {
     else
       cp -f "$f" "$target"
     fi
-    installed=$((installed+1))
+    installed=$((installed + 1))
   done
   echook "Installed ${installed} unit files to $dest"
   if [[ "$scope" == "user" ]]; then
@@ -806,7 +906,7 @@ cmd_doctor() {
   local missing=0
   local deps=(bash find awk sed grep)
   for d in "${deps[@]}"; do
-    if ! command -v "$d" >/dev/null 2>&1; then
+    if ! command -v "$d" > /dev/null 2>&1; then
       echoerr "Missing dependency: $d"
       missing=1
     fi
@@ -828,7 +928,7 @@ show_help() {
     sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"
     echo
   fi
-  cat <<'EOF'
+  cat << 'EOF'
 ServerUtils Runner (SOLEN)
 
 Usage:
@@ -922,14 +1022,14 @@ cmd_setup_motd_system() {
   echoinfo "System-wide SSH MOTD (no edits performed)"
   echo
   echo "Debian/Ubuntu — /etc/update-motd.d/90-solen (executable):"
-  cat <<'E'
+  cat << 'E'
 #!/bin/sh
 [ -x /usr/local/bin/serverutils ] || exit 0
 [ -t 1 ] || exit 0
 serverutils run motd/solen-motd -- --full
 E
   echo
-  
+
   echo "Then: chmod +x /etc/update-motd.d/90-solen"
   echo
   echo "Red Hat/Fedora (or no update-motd) — /etc/profile.d/solen-motd.sh:"
@@ -939,7 +1039,8 @@ E
 }
 
 main() {
-  local cmd="${1:-home}"; shift || true
+  local cmd="${1:-home}"
+  shift || true
   case "$cmd" in
     install)
       # wrapper to run installer script with flags
@@ -950,12 +1051,23 @@ main() {
     search) cmd_search "$@" ;;
     overview) cmd_overview "$@" ;;
     home) cmd_home "$@" ;;
-    tui) FORCE_TUI=1; cmd_home "$@" ;;
+    tui)
+      FORCE_TUI=1
+      cmd_home "$@"
+      ;;
     meta)
       # print metadata for a given script
       local json=0 q
       while [[ $# -gt 0 ]]; do
-        case "$1" in --json) json=1; shift ;; *) q="$1"; shift;; esac
+        case "$1" in --json)
+          json=1
+          shift
+          ;;
+        *)
+          q="$1"
+          shift
+          ;;
+        esac
       done
       [[ -n "${q:-}" ]] || die "Usage: serverutils meta <category/name|name|path> [--json]"
       local resolved
@@ -964,7 +1076,9 @@ main() {
       # if multiple, just pick first for now
       resolved="$(printf '%s\n' "$resolved" | head -n1)"
       if [[ $json -eq 1 ]]; then
-        local rel="${resolved#${SCRIPTS_DIR}/}"; local cat="$(dirname "$rel")"; local name_noext="$(basename "$rel" ".sh")"
+        local rel="${resolved#${SCRIPTS_DIR}/}"
+        local cat="$(dirname "$rel")"
+        local name_noext="$(basename "$rel" ".sh")"
         printf '{"category":"%s","name":"%s","key":"%s","path":"%s",%s}\n' "$cat" "$name_noext" "$cat/$name_noext" "$resolved" "$(meta_to_json_fields "$resolved")"
       else
         echo "$(script_key_for "$resolved")"
@@ -976,10 +1090,22 @@ main() {
       local subset="" strict=0 no_policy=0
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --subset) subset="$2"; shift 2 ;;
-          --strict) strict=1; shift ;;
-          --no-policy) no_policy=1; shift ;;
-          *) echoerr "Unknown option: $1"; exit 2 ;;
+          --subset)
+            subset="$2"
+            shift 2
+            ;;
+          --strict)
+            strict=1
+            shift
+            ;;
+          --no-policy)
+            no_policy=1
+            shift
+            ;;
+          *)
+            echoerr "Unknown option: $1"
+            exit 2
+            ;;
         esac
       done
       # build regex from subset (comma-separated globs)
@@ -994,60 +1120,97 @@ main() {
       fi
       local ok=0 warn=0 err=0
       while IFS= read -r f; do
-        local key; key="$(script_key_for "$f")"
+        local key
+        key="$(script_key_for "$f")"
         if [[ -n "$subset_re" ]] && ! echo "$key" | grep -Eq "$subset_re"; then continue; fi
         # env for validation
         local env_prefix="SOLEN_JSON=1 SOLEN_NOOP=1"
         if [[ $no_policy -eq 1 ]]; then env_prefix+=" SOLEN_POLICY=/dev/null"; fi
         # try both flags and env
         set +e
-        [[ -x "$f" ]] || chmod +x "$f" 2>/dev/null || true
-        out=$(eval "$env_prefix" "$f" --json --dry-run 2>/dev/null)
+        [[ -x "$f" ]] || chmod +x "$f" 2> /dev/null || true
+        out=$(eval "$env_prefix" "$f" --json --dry-run 2> /dev/null)
         rc=$?
         set -e
         local status="ok" reason=""
         if [[ $rc -ne 0 ]]; then
           case "$rc" in
-            1) status="warn"; reason="user error (args?)" ;;
-            2) status="warn"; reason="deps missing" ;;
-            4) status="warn"; reason="policy refused" ;;
-            *) status="error"; reason="exit $rc" ;;
+            1)
+              status="warn"
+              reason="user error (args?)"
+              ;;
+            2)
+              status="warn"
+              reason="deps missing"
+              ;;
+            4)
+              status="warn"
+              reason="policy refused"
+              ;;
+            *)
+              status="error"
+              reason="exit $rc"
+              ;;
           esac
         else
           # basic NDJSON checks
-          local lines total nonempty; total=0; nonempty=0
+          local lines total nonempty
+          total=0
+          nonempty=0
           local missing_keys=0
           while IFS= read -r line; do
-            total=$((total+1))
+            total=$((total + 1))
             [[ -z "$line" ]] && continue
-            nonempty=$((nonempty+1))
+            nonempty=$((nonempty + 1))
             # only consider JSON-looking lines
             if ! echo "$line" | grep -q '^{'; then continue; fi
             for k in '"status"' '"summary"' '"ts"' '"host"'; do
               if ! echo "$line" | grep -q "$k"; then missing_keys=1; fi
             done
           done <<< "$out"
-          if [[ $nonempty -eq 0 ]]; then status="error"; reason="no output"; fi
-          if [[ $missing_keys -eq 1 && $status = ok ]]; then status="warn"; reason="missing keys"; fi
+          if [[ $nonempty -eq 0 ]]; then
+            status="error"
+            reason="no output"
+          fi
+          if [[ $missing_keys -eq 1 && $status = ok ]]; then
+            status="warn"
+            reason="missing keys"
+          fi
           # verbs expectation for actions (only when rc==0)
-          local verbs; verbs=$(read_meta "$f" | sed -n 's/^verbs=//p' | tr ',' ' ')
+          local verbs
+          verbs=$(read_meta "$f" | sed -n 's/^verbs=//p' | tr ',' ' ')
           if echo "$verbs" | grep -Eq '\b(fix|ensure|update|upgrade|backup|restore)\b'; then
             if ! echo "$out" | grep -q '"actions"'; then
-              if [[ $strict -eq 1 ]]; then status="warn"; reason="no actions"; fi
+              if [[ $strict -eq 1 ]]; then
+                status="warn"
+                reason="no actions"
+              fi
             fi
           fi
         fi
         case "$status" in
-          ok) echo "$key -> ok"; ok=$((ok+1)) ;;
-          warn) echo "$key -> warn ($reason)"; warn=$((warn+1)) ;;
-          error) echo "$key -> error ($reason)"; err=$((err+1)) ;;
+          ok)
+            echo "$key -> ok"
+            ok=$((ok + 1))
+            ;;
+          warn)
+            echo "$key -> warn ($reason)"
+            warn=$((warn + 1))
+            ;;
+          error)
+            echo "$key -> error ($reason)"
+            err=$((err + 1))
+            ;;
         esac
       done < <(find_all_scripts)
       echo "---"
       echo "ok: $ok, warn: $warn, error: $err"
-      if [[ $err -gt 0 ]]; then exit 1
-      elif [[ $warn -gt 0 ]]; then exit 3
-      else exit 0
+      if [[ $err -gt 0 ]]; then
+        exit 1
+      elif [[ $warn -gt 0 ]]; then
+        exit 3
+      else
+        exit 0
       fi
       ;;
     banner)
@@ -1066,20 +1229,30 @@ main() {
     setup-motd) cmd_setup_motd "$@" ;;
     setup-motd-system) cmd_setup_motd_system "$@" ;;
     update)
-      local sub="${1:-check}"; shift || true
+      local sub="${1:-check}"
+      shift || true
       case "$sub" in
-        apply|--apply) cmd_run update/apply -- "$@" ;;
-        rollback|--rollback) cmd_run update/apply -- --rollback "$@" ;;
-        check|--check|"") cmd_run update/check -- "$@" ;;
-        *) echoerr "Unknown update action: $sub"; exit 2 ;;
+        apply | --apply) cmd_run update/apply -- "$@" ;;
+        rollback | --rollback) cmd_run update/apply -- --rollback "$@" ;;
+        check | --check | "") cmd_run update/check -- "$@" ;;
+        *)
+          echoerr "Unknown update action: $sub"
+          exit 2
+          ;;
       esac
       ;;
     status)
-      cmd_run update/status -- "$@" ;;
+      cmd_run update/status -- "$@"
+      ;;
     doctor) cmd_doctor "$@" ;;
     version) echo "$VERSION (schema $SCHEMA_VERSION)" ;;
-    help|-h|--help) show_help ;;
-    *) echoerr "Unknown command: $cmd"; echo; show_help; exit 2 ;;
+    help | -h | --help) show_help ;;
+    *)
+      echoerr "Unknown command: $cmd"
+      echo
+      show_help
+      exit 2
+      ;;
   esac
 }
 

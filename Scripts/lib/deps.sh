@@ -12,16 +12,16 @@
 solen_require_cmds() {
   local missing=()
   for cmd in "$@"; do
-    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    command -v "$cmd" > /dev/null 2>&1 || missing+=("$cmd")
   done
   if [[ ${#missing[@]} -gt 0 ]]; then
     local msg="Missing dependencies: ${missing[*]}"
-    if type solen_err >/dev/null 2>&1; then
+    if type solen_err > /dev/null 2>&1; then
       solen_err "$msg"
     else
       echo "Error: $msg" >&2
     fi
-    if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]] && type solen_json_record >/dev/null 2>&1; then
+    if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]] && type solen_json_record > /dev/null 2>&1; then
       solen_json_record error "$msg" "" "\"code\":2"
     fi
     exit 2
@@ -37,12 +37,12 @@ solen_require_cmds() {
 solen_require_root() {
   if [[ $EUID -ne 0 ]]; then
     local msg="This script must be run as root (use sudo)"
-    if type solen_err >/dev/null 2>&1; then
+    if type solen_err > /dev/null 2>&1; then
       solen_err "$msg"
     else
       echo "Error: $msg" >&2
     fi
-    if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]] && type solen_json_record >/dev/null 2>&1; then
+    if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]] && type solen_json_record > /dev/null 2>&1; then
       solen_json_record error "$msg" "" "\"code\":1"
     fi
     exit 1
@@ -60,12 +60,12 @@ solen_require_file() {
   local desc="${2:-file}"
   if [[ ! -r "$file" ]]; then
     local msg="Required $desc not found or not readable: $file"
-    if type solen_err >/dev/null 2>&1; then
+    if type solen_err > /dev/null 2>&1; then
       solen_err "$msg"
     else
       echo "Error: $msg" >&2
     fi
-    if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]] && type solen_json_record >/dev/null 2>&1; then
+    if [[ ${SOLEN_FLAG_JSON:-0} -eq 1 ]] && type solen_json_record > /dev/null 2>&1; then
       solen_json_record error "$msg" "" "\"code\":2"
     fi
     exit 2

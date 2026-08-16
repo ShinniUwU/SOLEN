@@ -107,10 +107,11 @@ if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
     id_short="${id:0:12}"
     # details record via unified envelope
     summary="container ${name} ${state}"
-    details=$(cat <<D
+    details=$(
+      cat << D
 "details":{"container":{"name":"$(solen_json_escape "$name")","id_short":"$id_short","image":"$(solen_json_escape "$image")","status":"$(solen_json_escape "$status")","state":"$state","health":"$health","ports":"$(solen_json_escape "$ports")","compose_project":"$(solen_json_escape "${compose:-}")","age":"$(solen_json_escape "$runningfor")"}}
 D
-)
+    )
     solen_json_record_full ok "$summary" "$details"
   done < "$containers_tmp"
 
@@ -131,10 +132,11 @@ D
       size_bytes=$(awk -v n="$num" -v m="$mul" 'BEGIN{ printf "%.0f", n*m }')
     fi
     summary="image ${repo}:${tag}"
-    details=$(cat <<D
+    details=$(
+      cat << D
 "details":{"image":{"repo":"$(solen_json_escape "$repo")","tag":"$(solen_json_escape "$tag")","id_short":"$id_short","size_bytes":$size_bytes,"dangling":$dangling}}
 D
-)
+    )
     solen_json_record_full ok "$summary" "$details"
   done < "$images_tmp"
 
