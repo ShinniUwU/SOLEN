@@ -188,6 +188,17 @@ EOS
     "$(cat "${THIS_DIR}/../../asset/shell/hooks/motd_fish.fish")"
 }
 
+install_starship_hook_user() {
+  mkdir -p "$HOME/.config/solen"
+  if [[ ! -f "$HOME/.config/solen/starship.toml" ]]; then
+    cp "${THIS_DIR}/../../asset/shell/starship.toml" "$HOME/.config/solen/starship.toml"
+  fi
+  solen_insert_marker_block "$HOME/.bashrc" \
+    "# >>> SOLEN STARSHIP_BASH (do not edit) >>>" \
+    "# <<< SOLEN STARSHIP_BASH (managed) <<<" \
+    "$(cat "${THIS_DIR}/../../asset/shell/hooks/starship_bash.sh")"
+}
+
 install_motd_hooks_global() {
   echo "$(cat "${THIS_DIR}/../../asset/shell/hooks/profile.d_solen.sh")" | sudo tee /etc/profile.d/solen.sh >/dev/null
   # update-motd hook for SSH logins (Debian/Ubuntu/Proxmox)
@@ -272,6 +283,11 @@ else
     fi
   fi
 
+  # Starship prompt — actually wire it into the shell, not just install the package
+  if [[ $with_starship -eq 1 && "$scope" == "user" ]]; then
+    add "edit ~/.bashrc to add SOLEN Starship init (guarded)"
+  fi
+
   # Copy shell assets
   if [[ $copy_shell_assets -eq 1 ]]; then
     if [[ "$scope" == "global" ]]; then
@@ -328,7 +344,9 @@ for cmd in "${plan_lines[@]}"; do
     edit\ ~/.rc*)
       install_motd_hooks_user; changed=$((changed+1)); ;;
     edit\ ~/.bash_profile*)
-      install_motd_hooks_user; ;;
+      : ;; # install_motd_hooks_user already writes .bash_profile; avoid a second, redundant call
+    edit\ ~/.bashrc\ to\ add\ SOLEN\ Starship*)
+      install_starship_hook_user; changed=$((changed+1)); ;;
     sudo*|./serverutils*|systemctl*|rm*|\#*)
       set +e; bash -lc "$cmd"; rc=$?; set -e; [[ $rc -eq 0 ]] && changed=$((changed+1)) || true ;;
     *)

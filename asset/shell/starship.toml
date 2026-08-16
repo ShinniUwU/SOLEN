@@ -5,19 +5,25 @@ format = "$username$hostname$directory$git_branch$git_state$git_status$cmd_durat
 
 [username]
 show_always = true
-style_user = "bold white"
+style_user = "bold green"
+style_root = "bold red"
 format = "[$user]($style)"
 
 [hostname]
 ssh_only = false
-format = "@[$hostname](dimmed) "
+style = "bold yellow"
+format = "@[$hostname](bold yellow) "
 
 [directory]
 truncate_to_repo = false
 style = "cyan"
+truncation_length = 3
+
+[cmd_duration]
+min_time = 2000
+format = "took [$duration](yellow) "
 
 [character]
-success_symbol = "❯"
-error_symbol = "❯"
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
 vicmd_symbol = "❮"
-

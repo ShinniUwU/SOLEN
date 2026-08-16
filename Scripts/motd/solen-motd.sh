@@ -210,6 +210,16 @@ bar() {
 to_gib() { awk -v m="$1" 'BEGIN{ printf "%.1f", m/1024 }'; }
 pct_of() { awk -v a="$1" -v b="$2" 'BEGIN{ if(b==0){print 0}else{printf "%.1f", (a*100)/b} }'; }
 pad2() { printf "%2s" "$1"; }
+# Visible-width padding: pads $1 with spaces to width $2, ignoring ANSI color codes
+# (a plain printf "%-Ns" would count escape-sequence bytes as visible chars and misalign)
+vpad() {
+  local s="$1" w="$2" plain len pad
+  plain="$(printf '%s' "$s" | sed 's/\x1b\[[0-9;]*m//g')"
+  len=${#plain}
+  pad=$((w - len))
+  [ "$pad" -lt 0 ] && pad=0
+  printf '%s%*s' "$s" "$pad" ""
+}
 
 print_human() {
   # Banner (if present)
@@ -253,25 +263,32 @@ print_human() {
     "$C_VAL" "$l15_per_core" "$C_RESET"
 
   # Memory line
-  local used_g total_g avail_g
+  local used_g total_g avail_g mem_val
   used_g=$(to_gib "$used_m"); total_g=$(to_gib "$total_m"); avail_g=$(to_gib "$avail_m")
-  printf "%s %s %s %s %s\n" "${C_KEY}Mem${C_RESET}:" "${C_VAL}${used_g}G${C_RESET}/${C_VAL}${total_g}G${C_RESET} avail ${C_VAL}${avail_g}G${C_RESET}" "$(bar "$mem_pct" 24)" "${C_DIM}" "${mem_pct%%%}%${C_RESET}" | awk '{printf "%s %-32s %-24s %s%s\n", $1, $2, $3, $4, $5}'
+  mem_val="${C_VAL}${used_g}G${C_RESET}/${C_VAL}${total_g}G${C_RESET} avail ${C_VAL}${avail_g}G${C_RESET}"
+  printf "%s %s %s %s%s%%%s\n" "${C_KEY}Mem${C_RESET}:" "$(vpad "$mem_val" 32)" "$(bar "$mem_pct" 24)" "${C_DIM}" "${mem_pct}" "${C_RESET}"
 
   # Swap line (if any)
   if [ "${swap_total_m:-0}" != "0" ]; then
-    local swap_used_g swap_total_g
+    local swap_used_g swap_total_g swap_val
     swap_used_g=$(to_gib "$swap_used_m"); swap_total_g=$(to_gib "$swap_total_m")
-    printf "%s %s %s %s %s\n" "${C_KEY}Swap${C_RESET}:" "${C_VAL}${swap_used_g}G${C_RESET}/${C_VAL}${swap_total_g}G${C_RESET}" "$(bar "$swap_pct" 24)" "${C_DIM}" "${swap_pct%%%}%${C_RESET}" | awk '{printf "%s %-32s %-24s %s%s\n", $1, $2, $3, $4, $5}'
+    swap_val="${C_VAL}${swap_used_g}G${C_RESET}/${C_VAL}${swap_total_g}G${C_RESET}"
+    printf "%s %s %s %s%s%%%s\n" "${C_KEY}Swap${C_RESET}:" "$(vpad "$swap_val" 32)" "$(bar "$swap_pct" 24)" "${C_DIM}" "${swap_pct}" "${C_RESET}"
   fi
 
   # Disks (top mounts)
   list_mounts() {
-    df -P -BG | awk 'NR>1 && $1!~/(tmpfs|overlay|devtmpfs)/{gsub("G","",$2); gsub("G","",$3); gsub("%","",$5); printf "%s %s %s %s\n", $6,$3,$2,$5 }'
+    df -P -BG -x tmpfs -x devtmpfs -x overlay -x squashfs -x efivarfs -x udev 2>/dev/null \
+      | awk 'NR>1 && $6!~/^\/(dev|sys|proc|run|boot\/efi)($|\/)/{gsub("G","",$2); gsub("G","",$3); gsub("%","",$5); printf "%s %s %s %s\n", $6,$3,$2,$5 }'
   }
   local printed=0
   while read -r mnt used total pct; do
     [ -z "$mnt" ] && continue
-    printf "%s %s %s %s %s\n" "${C_KEY}Disk${C_RESET}:" "$(printf "%-5s %s%sG%s/%s%sG%s" "$mnt" "$C_VAL" "$used" "$C_RESET" "$C_VAL" "$total" "$C_RESET")" "$(bar "$pct" 24)" "${C_DIM}" "${pct%%%}%${C_RESET}" | awk '{printf "%s %-32s %-24s %s%s\n", $1, $2, $3, $4, $5}'
+    local disk_val mnt_short
+    mnt_short="$mnt"
+    [ "${#mnt_short}" -gt 12 ] && mnt_short="${mnt_short:0:11}…"
+    disk_val="$(vpad "$mnt_short" 13)${C_VAL}${used}G${C_RESET}/${C_VAL}${total}G${C_RESET}"
+    printf "%s %s %s %s%s%%%s\n" "${C_KEY}Disk${C_RESET}:" "$(vpad "$disk_val" 32)" "$(bar "$pct" 24)" "${C_DIM}" "${pct}" "${C_RESET}"
     printed=$((printed+1))
     [ $printed -ge 3 ] && break
   done < <(list_mounts)
