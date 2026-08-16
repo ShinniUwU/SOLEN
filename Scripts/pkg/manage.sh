@@ -86,7 +86,7 @@ pkg_check_dnf() {
     dnf -q makecache > /dev/null 2>&1 || true
     out=$(dnf -q check-update || true)
   fi
-  cnt=$(printf "%s\n" "$out" | awk '/^\S+\.\S+\s+\S+\s+\S+$/ {c++} END{print c+0}')
+  cnt=$(printf "%s\n" "$out" | awk '/^[^[:space:]]+\.[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+$/ {c++} END{print c+0}')
   reboot=0
   if command -v needs-restarting > /dev/null 2>&1; then
     needs-restarting -r > /dev/null 2>&1 || reboot=$?

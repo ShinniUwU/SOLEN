@@ -111,11 +111,12 @@ ACTIONS
 if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
   if [[ ${policy_denied_docker:-0} -eq 1 ]]; then
     solen_warn "policy would refuse docker restart (dry-run)"
+    echo "would change 0 items"
   else
     solen_info "[dry-run] Would execute:"
+    echo "would change 2 items"
   fi
   printf '%s\n' "$actions"
-  echo "would change 2 items"
   if [[ $SOLEN_FLAG_JSON -eq 1 ]]; then
     if [[ ${policy_denied_docker:-0} -eq 1 ]]; then
       solen_json_record warn "policy would refuse docker restart (dry-run)" "$actions" "\"would_change\":0"

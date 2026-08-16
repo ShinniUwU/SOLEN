@@ -8,7 +8,8 @@ solen_insert_marker_block() {
   mkdir -p "$(dirname "$file")" 2>/dev/null || true
   touch "$file"
   # Remove existing block
-  tmpfile="${file}.tmp.$$"
+  tmpfile="$(mktemp "${file}.XXXXXX")"
+  chmod --reference="$file" "$tmpfile" 2>/dev/null || true
   awk -v b="$begin" -v e="$end" '
     BEGIN{inblk=0}
     { if(index($0,b)==1){inblk=1; next} }
@@ -29,7 +30,8 @@ solen_insert_marker_block() {
 solen_remove_marker_block() {
   local file="$1" begin="$2" end="$3"
   [ -f "$file" ] || return 0
-  tmpfile="${file}.tmp.$$"
+  tmpfile="$(mktemp "${file}.XXXXXX")"
+  chmod --reference="$file" "$tmpfile" 2>/dev/null || true
   awk -v b="$begin" -v e="$end" '
     BEGIN{inblk=0}
     { if(index($0,b)==1){inblk=1; next} }

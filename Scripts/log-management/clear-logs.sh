@@ -94,12 +94,14 @@ solen_info "starting log cleanup"
 
 # 1. Clean Journald Logs
 changed_count=0
+would_change_count=0
 actions_list=""
 
 if command -v journalctl > /dev/null 2>&1; then
   solen_info "vacuum journald (time ${JOURNALD_VACUUM_TIME}, size ${JOURNALD_VACUUM_SIZE})"
   actions_list+="journalctl --vacuum-size=${JOURNALD_VACUUM_SIZE} --vacuum-time=${JOURNALD_VACUUM_TIME}
 "
+  would_change_count=$((would_change_count + 1))
   if [[ $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
     journalctl --vacuum-size=${JOURNALD_VACUUM_SIZE} --vacuum-time=${JOURNALD_VACUUM_TIME}
     changed_count=$((changed_count + 1))
@@ -127,6 +129,7 @@ if [ ${#TRUNCATE_LOGS[@]} -gt 0 ]; then
       fi
       actions_list+="truncate -s 0 $log_file
 "
+      would_change_count=$((would_change_count + 1))
       if [[ $SOLEN_FLAG_DRYRUN -ne 1 ]]; then
         : "${USE_SUDO:=}"
         [[ $EUID -ne 0 ]] && USE_SUDO="sudo" || USE_SUDO=""
@@ -147,7 +150,7 @@ fi
 echo # Newline for spacing
 
 if [[ $SOLEN_FLAG_DRYRUN -eq 1 ]]; then
-  echo "would change $changed_count items"
+  echo "would change $would_change_count items"
 fi
 
 solen_ok "log cleanup finished"

@@ -47,12 +47,6 @@ while [[ $# -gt 0 ]]; do
   *) break ;; esac
 done
 
-# Optional policy token: docker-introspection
-if ! solen_policy_allows_service_restart "docker"; then
-  # reuse service gate only for example, or check generic token if available
-  :
-fi
-
 # Policy token gate (optional)
 if ! solen_policy_allows_token "docker-introspection"; then
   solen_warn "policy refused: docker-introspection"

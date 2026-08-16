@@ -57,6 +57,10 @@ fi
 
 manifest_url="${BASE_URL}/releases/manifest-${CHANNEL}.json"
 tmp_manifest="$(mktemp)"
+work=""
+cleanup() { rm -f "$tmp_manifest"; [[ -n "$work" ]] && rm -rf "$work"; }
+trap cleanup EXIT INT TERM
+
 if ! curl -fsSL --max-time 6 "$manifest_url" -o "$tmp_manifest"; then
   echo "Cannot fetch manifest" >&2; exit 3
 fi
@@ -72,11 +76,10 @@ date_iso="$(jq -r '.date // empty' "$tmp_manifest")"
 
 echo "Plan: update to $version ($CHANNEL)${breaking:+, breaking=$breaking}"
 if [[ $YES -ne 1 ]]; then
-  echo "Dry-run (use --yes to apply)"; rm -f "$tmp_manifest"; exit 0
+  echo "Dry-run (use --yes to apply)"; exit 0
 fi
 
 work="$(mktemp -d -t solen.up.XXXXXX)"
-trap 'rm -rf "$work"' EXIT INT TERM
 tarball="$work/solen.tar.gz"
 
 curl -fsSL "$url" -o "$tarball"
@@ -90,6 +93,8 @@ if [[ -n "$sig_b64" ]]; then
     fi
   elif [[ "${SOLEN_REQUIRE_SIGNATURE:-0}" = "1" ]]; then
     echo "Signature required but verification not possible (missing pubkey or openssl)" >&2; exit 4
+  else
+    echo "Warning: manifest is signed but signature could not be verified (missing SOLEN_SIGN_PUBKEY_PEM or openssl); proceeding unverified" >&2
   fi
 fi
 actual="$(sha256sum "$tarball" 2>/dev/null | awk '{print $1}')"
@@ -124,5 +129,4 @@ mkdir -p "$latest_dir"
 cp -a "$newroot/." "$latest_dir/"
 
 echo "Applied $version to $latest_dir (backup at $backup)"
-rm -f "$tmp_manifest"
 exit 0

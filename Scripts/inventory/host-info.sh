@@ -80,10 +80,13 @@ fi
 # Services (systemd)
 svc_sshd="unknown"; svc_cron="unknown"; svc_docker="unknown"
 if command -v systemctl >/dev/null 2>&1; then
-  systemctl is-active --quiet ssh || true; [[ $? -eq 0 ]] && svc_sshd="active" || svc_sshd="inactive"
-  systemctl is-active --quiet sshd || true; [[ $? -eq 0 ]] && svc_sshd="active" || true
-  systemctl is-active --quiet cron || true; [[ $? -eq 0 ]] && svc_cron="active" || svc_cron="inactive"
-  systemctl is-active --quiet docker || true; [[ $? -eq 0 ]] && svc_docker="active" || svc_docker="inactive"
+  if systemctl is-active --quiet ssh || systemctl is-active --quiet sshd; then
+    svc_sshd="active"
+  else
+    svc_sshd="inactive"
+  fi
+  if systemctl is-active --quiet cron; then svc_cron="active"; else svc_cron="inactive"; fi
+  if systemctl is-active --quiet docker; then svc_docker="active"; else svc_docker="inactive"; fi
 fi
 
 host="$(solen_host)"; oss="$(os)"; kern="$(kernel)"; up="$(uptime_h)"

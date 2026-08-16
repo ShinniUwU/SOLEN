@@ -62,20 +62,26 @@ thres_or() {
     if [[ -n "${val:-}" && "${val}" != "null" ]]; then printf '%s' "$val"; return; fi
   fi
   awk -v key="$key" -v def="$def" '
-    function trim(s){ gsub(/^\s+|\s+$/, "", s); return s }
+    function trim(s){
+      sub(/#.*/, "", s)
+      gsub(/\r/, "", s)
+      gsub(/^[ \t]+|[ \t]+$/, "", s)
+      return s
+    }
     BEGIN{FS=":"}
-    { line=$0 }
-    /thresholds:/ {t=1}
-    t && /disk_root_pct:/ {scope="disk_root_pct"}
-    t && /load15_per_core:/ {scope="load15_per_core"}
-    t && /mem_pressure_pct:/ {scope="mem_pressure_pct"}
-    t && scope && /warn:/ { w=trim($2) }
-    t && scope && /error:/ { e=trim($2) }
+    /thresholds:/ {t=1; next}
+    t && /^[^ \t#]/ && !/thresholds:/ {t=0}
+    t && /disk_root_pct:/ {scope="disk_root_pct"; next}
+    t && /load15_per_core:/ {scope="load15_per_core"; next}
+    t && /mem_pressure_pct:/ {scope="mem_pressure_pct"; next}
+    t && scope && /warn:/ { w[scope]=trim($2) }
+    t && scope && /error:/ { e[scope]=trim($2) }
     END {
       split(key, parts, ".");
-      if(parts[2]=="disk_root_pct"){ if(parts[3]=="warn") print (w?w:def); else if(parts[3]=="error") print (e?e:def); else print def }
-      else if(parts[2]=="load15_per_core"){ if(parts[3]=="warn") print (w?w:def); else if(parts[3]=="error") print (e?e:def); else print def }
-      else if(parts[2]=="mem_pressure_pct"){ if(parts[3]=="warn") print (w?w:def); else if(parts[3]=="error") print (e?e:def); else print def }
+      s=parts[2]; f=parts[3];
+      if (f=="warn") { print ((s in w) && w[s]!="" ? w[s] : def) }
+      else if (f=="error") { print ((s in e) && e[s]!="" ? e[s] : def) }
+      else { print def }
     }
   ' "$HEALTH_CFG"
 }

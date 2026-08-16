@@ -44,10 +44,13 @@ if [[ -n "$latest_ver" && -n "$installed_ver" ]]; then
 fi
 
 host="$(hostname 2>/dev/null || uname -n)"
+# Guard against a malformed cache entry (breaking not a real JSON boolean),
+# which would otherwise make --argjson fail and crash the script.
+case "${breaking:-false}" in true|false) ;; *) breaking=false ;; esac
 if [[ $JSON -eq 1 ]]; then
   status="ok"; summary="solen up-to-date"
   if [[ $update_available -eq 1 ]]; then summary="update available — ${installed_ver:-unknown} → ${latest_ver}"; fi
-  jq -n --arg inst "$installed_ver" --arg latest "$latest_ver" --arg ch "$channel" --arg ts "$checked_at" --arg host "$host" --arg sum "$summary" --argjson brk ${breaking:-false} \
+  jq -n --arg inst "$installed_ver" --arg latest "$latest_ver" --arg ch "$channel" --arg ts "$checked_at" --arg host "$host" --arg sum "$summary" --argjson brk "${breaking:-false}" \
     --argjson upd $update_available '{installed_version:$inst, latest_version:$latest, channel:$ch, breaking:$brk, ts:$ts, host:$host, status:"ok", summary:$sum, update_available:$upd}'
 else
   if [[ $update_available -eq 1 ]]; then

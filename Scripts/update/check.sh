@@ -64,6 +64,9 @@ fi
 
 ver=$(jq -r '.version' "$tmp")
 brk=$(jq -r '.breaking // false' "$tmp")
+# Guard against a malformed remote manifest (breaking not a real JSON
+# boolean), which would otherwise make --argjson fail and crash the script.
+case "$brk" in true|false) ;; *) brk=false ;; esac
 jq -n --arg inst "" --arg latest "$ver" --arg ch "$CHANNEL" --arg ts "$checked_at" --argjson breaking "$brk" --arg host "$host" \
   --arg sum "cached latest ($CHANNEL): $ver" \
   '{installed_version:$inst, latest_version:$latest, channel:$ch, breaking:$breaking, ts:$ts, host:$host, status:"ok", summary:$sum}' \
