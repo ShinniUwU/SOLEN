@@ -289,107 +289,24 @@ cmd_overview() {
 cmd_home() {
   # If TTY and not disabled, show a simple interactive menu
   if { [[ -t 1 ]] || [[ "${FORCE_TUI:-0}" == "1" ]]; } && [[ "${SOLEN_NO_TUI:-0}" != "1" ]]; then
+    local host
+    host="$(hostname 2> /dev/null || uname -n)"
     while true; do
       command -v clear > /dev/null 2>&1 && clear || true
-      [[ -f "${ROOT_DIR}/asciiart.ascii" ]] && {
-        sed "s/{{VERSION}}/$VERSION/" "${ROOT_DIR}/asciiart.ascii"
-        echo
-      }
-      local _motd_rc
-      case "${SHELL##*/}" in zsh) _motd_rc="$HOME/.zshrc" ;; fish) _motd_rc="$HOME/.config/fish/config.fish" ;; *) _motd_rc="$HOME/.bashrc" ;; esac
-      local _motd_configured=0
-      { grep -q 'solen-motd' "$_motd_rc" 2> /dev/null || grep -q 'solen-motd' /etc/profile.d/solen-motd.sh 2> /dev/null || [[ -f /etc/update-motd.d/90-solen ]]; } && _motd_configured=1
-      echo "SOLEN Runner — choose an action:"
-      echo "  1) List scripts (then run)"
-      echo "  2) Search scripts (then run)"
+      echo "SOLEN — ${host}"
+      echo "  1) Run a script"
+      echo "  2) Update SOLEN"
       echo "  3) Health check"
-      echo "  4) Apt update/upgrade (dry-run)"
-      echo "  5) Install runner (user)"
-      echo "  6) Overview"
-      [[ $_motd_configured -eq 0 ]] && echo "  7) Setup MOTD (print snippet)"
-      echo "  r) Run a script by key/name"
+      echo "  4) Setup (runner, MOTD, units)"
       echo "  q) Quit"
       printf "> "
       local choice
       read -r choice
       case "$choice" in
-        1)
-          cmd_list
-          echo
-          printf "Enter key/name to run (blank to return): "
-          read -r runkey
-          if [[ -n "$runkey" ]]; then
-            # Pre-resolve here to surface ambiguities before asking for extra args
-            local candidates chosen
-            candidates="$(resolve_script_by_key_or_name "$runkey")"
-            if [[ -z "$candidates" ]]; then
-              echoerr "No matches for '$runkey'"
-              :
-            elif [[ "$(printf '%s\n' "$candidates" | wc -l)" -gt 1 ]]; then
-              chosen="$(printf '%s\n' "$candidates" | choose_interactively)" || chosen=""
-              if [[ -z "$chosen" ]]; then
-                echowarn "Selection canceled"
-                :
-              else
-                printf "Extra args (after --), or blank: "
-                read -r extra
-                if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
-              fi
-            else
-              chosen="$candidates"
-              printf "Extra args (after --), or blank: "
-              read -r extra
-              if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
-            fi
-          fi
-          ;;
-        2)
-          printf "Search query: "
-          read -r q
-          if [[ -n "$q" ]]; then
-            resolved="$(resolve_script_by_key_or_name "$q")"
-            if [[ -z "$resolved" ]]; then echoerr "No matches"; else
-              chosen="$(printf '%s\n' "$resolved" | choose_interactively)" || chosen=""
-              if [[ -n "$chosen" ]]; then
-                printf "Extra args (after --), or blank: "
-                read -r extra
-                if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
-              else
-                echowarn "Selection canceled"
-              fi
-            fi
-          fi
-          ;;
-        r | R)
-          printf "Enter key/name to run: "
-          read -r runkey
-          if [[ -n "$runkey" ]]; then
-            local candidates chosen
-            candidates="$(resolve_script_by_key_or_name "$runkey")"
-            if [[ -z "$candidates" ]]; then
-              echoerr "No matches for '$runkey'"
-            elif [[ "$(printf '%s\n' "$candidates" | wc -l)" -gt 1 ]]; then
-              chosen="$(printf '%s\n' "$candidates" | choose_interactively)" || chosen=""
-              if [[ -z "$chosen" ]]; then
-                echowarn "Selection canceled"
-              else
-                printf "Extra args (after --), or blank: "
-                read -r extra
-                if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
-              fi
-            else
-              chosen="$candidates"
-              printf "Extra args (after --), or blank: "
-              read -r extra
-              if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
-            fi
-          fi
-          ;;
+        1) menu_run_script ;;
+        2) menu_update ;;
         3) cmd_run health/check || true ;;
-        4) cmd_run system-maintenance/update-and-report -- --dry-run || true ;;
-        5) cmd_install_runner --user || true ;;
-        6) cmd_overview || true ;;
-        7) cmd_setup_motd || true ;;
+        4) menu_setup ;;
         q | Q | "") break ;;
         *) echoerr "Unknown choice" ;;
       esac
@@ -400,6 +317,72 @@ cmd_home() {
   else
     show_help
   fi
+}
+
+# One flow for browsing, searching, and running by key/name - the old menu
+# had this logic copy-pasted three times (list-then-run, search-then-run,
+# run-by-key) with only the leading prompt differing.
+menu_run_script() {
+  printf "Search/key (blank = list all): "
+  local q
+  read -r q
+  if [[ -z "$q" ]]; then
+    cmd_list
+    echo
+    printf "Enter key/name to run (blank to return): "
+    read -r q
+    [[ -z "$q" ]] && return
+  fi
+  local candidates chosen
+  candidates="$(resolve_script_by_key_or_name "$q")"
+  if [[ -z "$candidates" ]]; then
+    echoerr "No matches for '$q'"
+    return
+  fi
+  # choose_interactively returns the sole match directly without prompting
+  # when there's only one, so this is safe for both single and multi matches.
+  chosen="$(printf '%s\n' "$candidates" | choose_interactively)" || {
+    echowarn "Selection canceled"
+    return
+  }
+  printf "Extra args (after --), or blank: "
+  local extra
+  read -r extra
+  if [[ -n "$extra" ]]; then cmd_run "$chosen" -- $extra || true; else cmd_run "$chosen" || true; fi
+}
+
+menu_update() {
+  echoinfo "Checking for updates..."
+  cmd_run update/status || true
+  echo
+  printf "Apply update now? [y/N]: "
+  local ans
+  read -r ans
+  if [[ "$ans" =~ ^[Yy]$ ]]; then
+    cmd_run update/apply -- --yes || true
+  else
+    echoinfo "Skipped. Roll back anytime with: serverutils update rollback"
+  fi
+}
+
+menu_setup() {
+  echo "Setup:"
+  echo "  1) Install runner + quickstart (recommended)"
+  echo "  2) Show shell MOTD snippet"
+  echo "  3) Show system-wide SSH MOTD snippet"
+  echo "  b) Back"
+  printf "> "
+  local sc
+  read -r sc
+  case "$sc" in
+    1)
+      cmd_install_runner --user || true
+      cmd_setup_quickstart || true
+      ;;
+    2) cmd_setup_motd || true ;;
+    3) cmd_setup_motd_system || true ;;
+    *) : ;;
+  esac
 }
 
 cmd_list() {
@@ -969,7 +952,7 @@ What this tool can do:
   - Inventory: docker info, network interfaces, ports, connectivity
   - System maintenance: apt updates/upgrades, cleanup, log vacuuming
   - Docker helpers: update a compose app with confirm and dry-run
-  - Backups & Health: scaffolds included; real implementations coming next
+  - Backups & Health: Kopia-backed backups, threshold-based health checks
 
 Quick start:
   - Browse scripts with summaries:   serverutils list --long
