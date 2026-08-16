@@ -103,6 +103,10 @@ ROOT_DIR="$(cd "${THIS_DIR}/../.." && pwd)"
 cfg_path="${SOLEN_BACKUPS_CONFIG:-${ROOT_DIR}/config/solen-backups.yaml}"
 dest="${dest_override:-/var/backups/solen}"
 ret_days="${ret_days:-7}"
+if [[ ! "$ret_days" =~ ^[0-9]+$ ]]; then
+  solen_err "invalid --retention-days: $ret_days (expected a non-negative integer)"
+  exit 1
+fi
 
 # Policy tokens (scaffold): backup-profile:<name>, backup-path:<dest>
 if ! solen_policy_allows_token "backup-profile:${profile}"; then
@@ -224,8 +228,14 @@ if [[ -z "${KOPIA_PASSWORD:-}" && -z "${KOPIA_PASSWORD_FILE:-}" ]]; then
   if [[ ! -f "$KOPIA_PASSWORD_FILE_DEFAULT" ]]; then
     if [[ $SOLEN_FLAG_DRYRUN -eq 0 && $SOLEN_FLAG_YES -eq 1 ]]; then
       mkdir -p "$(dirname "$KOPIA_PASSWORD_FILE_DEFAULT")"
-      tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 >"$KOPIA_PASSWORD_FILE_DEFAULT"
-      chmod 600 "$KOPIA_PASSWORD_FILE_DEFAULT"
+      # Create with 600 perms before any content is written, closing the
+      # window where the plaintext password would otherwise be
+      # world/group-readable under the default umask.
+      install -m 600 /dev/null "$KOPIA_PASSWORD_FILE_DEFAULT"
+      # pipefail must be off for this pipeline: `head` closing its stdin
+      # after 32 bytes sends `tr` a SIGPIPE (exit 141), which pipefail
+      # would otherwise propagate as this pipeline's status under set -e.
+      ( set +o pipefail; tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 >"$KOPIA_PASSWORD_FILE_DEFAULT" )
     fi
   fi
   export KOPIA_PASSWORD_FILE="$KOPIA_PASSWORD_FILE_DEFAULT"
@@ -239,24 +249,30 @@ if [[ $use_kopia -eq 1 ]]; then
   if [[ "$repo_kind" == "filesystem" ]] && [[ "$repo_path" == /var/* ]]; then use_sudo=1; fi
   SUDO=""; [[ $use_sudo -eq 1 ]] && SUDO="sudo -E"
 
+  pw_file_q="$(printf '%q' "${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}")"
   if [[ "$repo_kind" == "filesystem" ]]; then
-    actions_list+=$"$SUDO mkdir -p \"$repo_path\"\n"
-    actions_list+=$"$SUDO env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia repository connect filesystem --path \"$repo_path\" 2>/dev/null || \\\n+$SUDO env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia repository create filesystem --path \"$repo_path\"\n"
+    repo_path_q="$(printf '%q' "$repo_path")"
+    actions_list+="$SUDO mkdir -p $repo_path_q"$'\n'
+    actions_list+="$SUDO env KOPIA_PASSWORD_FILE=$pw_file_q kopia repository connect filesystem --path $repo_path_q 2>/dev/null || $SUDO env KOPIA_PASSWORD_FILE=$pw_file_q kopia repository create filesystem --path $repo_path_q"$'\n'
   else
     # S3 repo: require bucket & region
     if [[ -z "${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}" ]]; then
-      actions_list+=$"# ERROR: missing SOLEN_KOPIA_S3_REGION or AWS_REGION for S3 repo\n"
+      actions_list+="# ERROR: missing SOLEN_KOPIA_S3_REGION or AWS_REGION for S3 repo"$'\n'
     fi
     region="${SOLEN_KOPIA_S3_REGION:-${AWS_REGION:-}}"
-    endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=${SOLEN_KOPIA_S3_ENDPOINT}"
-    actions_list+=$"env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia repository connect s3 --bucket \"${SOLEN_KOPIA_S3_BUCKET}\" --prefix \"${SOLEN_KOPIA_S3_PREFIX:-solen}\" --region \"${region}\"${endpoint_opt} 2>/dev/null || \\\n+env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia repository create s3 --bucket \"${SOLEN_KOPIA_S3_BUCKET}\" --prefix \"${SOLEN_KOPIA_S3_PREFIX:-solen}\" --region \"${region}\"${endpoint_opt}\n"
+    endpoint_opt=""; [[ -n "${SOLEN_KOPIA_S3_ENDPOINT:-}" ]] && endpoint_opt=" --endpoint=$(printf '%q' "${SOLEN_KOPIA_S3_ENDPOINT}")"
+    bucket_q="$(printf '%q' "${SOLEN_KOPIA_S3_BUCKET}")"
+    prefix_q="$(printf '%q' "${SOLEN_KOPIA_S3_PREFIX:-solen}")"
+    region_q="$(printf '%q' "$region")"
+    actions_list+="env KOPIA_PASSWORD_FILE=$pw_file_q kopia repository connect s3 --bucket $bucket_q --prefix $prefix_q --region $region_q${endpoint_opt} 2>/dev/null || env KOPIA_PASSWORD_FILE=$pw_file_q kopia repository create s3 --bucket $bucket_q --prefix $prefix_q --region $region_q${endpoint_opt}"$'\n'
   fi
   # snapshots per source
   for src in "${SRC_PATHS[@]}"; do
+    src_q="$(printf '%q' "$src")"
     # compose excludes: defaults + per-source
     excl_flags=()
     # defaults
-    for ex in "${DEFAULT_EXCLUDES[@]:-}"; do excl_flags+=("--exclude-glob" "$ex"); done
+    for ex in "${DEFAULT_EXCLUDES[@]}"; do excl_flags+=("--exclude-glob" "$ex"); done
     # per-source (split EXCLUDES_FOR[src] by |)
     exlist="${EXCLUDES_FOR[$src]:-}"
     if [[ -n "$exlist" ]]; then
@@ -264,14 +280,14 @@ if [[ $use_kopia -eq 1 ]]; then
       for e in "${eps[@]}"; do [[ -n "$e" ]] && excl_flags+=("--exclude-glob" "$e"); done
     fi
     if [[ ${#excl_flags[@]} -gt 0 ]]; then
-      actions_list+=$"$SUDO env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia snapshot create \"$src\" $(printf '%q ' "${excl_flags[@]}")\n"
+      actions_list+="$SUDO env KOPIA_PASSWORD_FILE=$pw_file_q kopia snapshot create $src_q $(printf '%q ' "${excl_flags[@]}")"$'\n'
     else
-      actions_list+=$"$SUDO env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia snapshot create \"$src\"\n"
+      actions_list+="$SUDO env KOPIA_PASSWORD_FILE=$pw_file_q kopia snapshot create $src_q"$'\n'
     fi
-    # per-source retention
-    actions_list+=$"$SUDO env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia policy set \"$src\" --keep-within-duration ${ret_days}d\n"
+    # per-source retention (ret_days validated numeric above)
+    actions_list+="$SUDO env KOPIA_PASSWORD_FILE=$pw_file_q kopia policy set $src_q --keep-within-duration ${ret_days}d"$'\n'
   done
-  actions_list+=$"$SUDO env KOPIA_PASSWORD_FILE=\"${KOPIA_PASSWORD_FILE:-$KOPIA_PASSWORD_FILE_DEFAULT}\" kopia maintenance run --quick\n"
+  actions_list+="$SUDO env KOPIA_PASSWORD_FILE=$pw_file_q kopia maintenance run --quick"$'\n'
 else
   # Scaffold fallback (rsync-style plan only)
   actions_list=$(

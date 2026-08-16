@@ -94,11 +94,21 @@ case "$chosen" in
     actions+=$'sudo dnf -y install kopia\n'
     ;;
   binary)
-    actions+=$"mkdir -p \"$dest\"\n"
-    actions+=$"curl -fsSL -o /tmp/${tarname} \"${url}\"\n"
-    actions+=$"tar -C /tmp -xzf /tmp/${tarname}\n"
-    actions+=$"install -m 0755 /tmp/kopia-${version#v}-linux-$(arch)/kopia \"$dest/kopia\"\n"
-    actions+=$"rm -rf /tmp/${tarname} /tmp/kopia-${version#v}-linux-$(arch)\n"
+    # Extract into a securely-created temp dir (mktemp uses O_EXCL, so it
+    # can't be pre-staged as a symlink) instead of a fixed, predictable
+    # /tmp path that a local attacker could race to hijack.
+    work_dir="$(mktemp -d)"
+    extracted_dir="${work_dir}/kopia-${version#v}-linux-$(arch)"
+    work_dir_q="$(printf '%q' "$work_dir")"
+    dest_q="$(printf '%q' "$dest")"
+    url_q="$(printf '%q' "$url")"
+    tar_path_q="$(printf '%q' "${work_dir}/${tarname}")"
+    extracted_dir_q="$(printf '%q' "$extracted_dir")"
+    actions+="mkdir -p $dest_q"$'\n'
+    actions+="curl -fsSL -o $tar_path_q $url_q"$'\n'
+    actions+="tar -C $work_dir_q -xzf $tar_path_q"$'\n'
+    actions+="install -m 0755 ${extracted_dir_q}/kopia ${dest_q}/kopia"$'\n'
+    actions+="rm -rf $work_dir_q"$'\n'
     ;;
 esac
 

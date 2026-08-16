@@ -103,12 +103,12 @@ service_rules_for() {
     *) echo "" ;;
   esac
 }
-for s in "${services[@]:-}"; do
+for s in "${services[@]}"; do
   for rule in $(service_rules_for "$s"); do
     allows+=("$rule")
   done
 done
-for spec in "${allows[@]:-}"; do
+for spec in "${allows[@]}"; do
   if [[ "$spec" =~ ^([0-9]+)$ ]]; then
     norm_allows+=("tcp:$spec")
   elif [[ "$spec" =~ ^(tcp|udp):([0-9]+)$ ]]; then
@@ -118,6 +118,11 @@ for spec in "${allows[@]:-}"; do
     exit 1
   fi
 done
+
+if [[ ! "$ssh_port" =~ ^[0-9]+$ ]] || (( ssh_port < 1 || ssh_port > 65535 )); then
+  solen_err "invalid --ssh-port: $ssh_port (expected 1-65535)"
+  exit 1
+fi
 
 pick_mode() {
   case "$mode" in
@@ -138,6 +143,9 @@ if [[ "$chosen" == "none" ]]; then
   exit 2
 fi
 
+have_ip6tables=0
+command -v ip6tables >/dev/null 2>&1 && have_ip6tables=1
+
 actions=""
 if [[ -n "$commit_file" ]]; then
   # Commit pre-generated plan
@@ -154,10 +162,10 @@ if [[ "$chosen" == "ufw" ]]; then
   else
     actions+=$'sudo ufw default allow outgoing\n'
   fi
-  actions+=$"sudo ufw allow ${ssh_port}/tcp\n"
-  for a in "${norm_allows[@]:-}"; do
+  actions+="sudo ufw allow ${ssh_port}/tcp"$'\n'
+  for a in "${norm_allows[@]}"; do
     proto="${a%%:*}"; port="${a##*:}"
-    actions+=$"sudo ufw allow ${port}/${proto}\n"
+    actions+="sudo ufw allow ${port}/${proto}"$'\n'
   done
   actions+=$'sudo ufw --force enable\n'
 elif [[ "$chosen" == "nftables" ]]; then
@@ -167,10 +175,10 @@ elif [[ "$chosen" == "nftables" ]]; then
   actions+=$'sudo nft list chain inet filter input >/dev/null 2>&1 || sudo nft add chain inet filter input { type filter hook input priority 0; policy drop; }\n'
   actions+=$'sudo nft add rule inet filter input ct state established,related accept 2>/dev/null || true\n'
   actions+=$'sudo nft add rule inet filter input iif lo accept 2>/dev/null || true\n'
-  actions+=$"sudo nft add rule inet filter input tcp dport ${ssh_port} accept 2>/dev/null || true\n"
-  for a in "${norm_allows[@]:-}"; do
+  actions+="sudo nft add rule inet filter input tcp dport ${ssh_port} accept 2>/dev/null || true"$'\n'
+  for a in "${norm_allows[@]}"; do
     proto="${a%%:*}"; port="${a##*:}"
-    actions+=$"sudo nft add rule inet filter input ${proto} dport ${port} accept 2>/dev/null || true\n"
+    actions+="sudo nft add rule inet filter input ${proto} dport ${port} accept 2>/dev/null || true"$'\n'
   done
   # Egress
   actions+=$'sudo nft list chain inet filter output >/dev/null 2>&1 || sudo nft add chain inet filter output { type filter hook output priority 0; policy accept; }\n'
@@ -183,41 +191,68 @@ elif [[ "$chosen" == "nftables" ]]; then
   fi
   if [[ $persist -eq 1 ]]; then
     ts=$(date -u +%Y%m%d-%H%M%S)
-    nft_conf="# /etc/nftables.conf managed by SOLEN\nflush ruleset\n\n table inet filter {\n  chain input { type filter hook input priority 0; policy drop;\n    ct state established,related accept\n    iif lo accept\n    tcp dport ${ssh_port} accept\n"
-    for a in ${norm_allows[@]:-}; do nft_conf+=$"    ${a%%:*} dport ${a##*:} accept\n"; done
-    nft_conf+=$"  }\n  chain output { type filter hook output priority 0; policy $([[ $egress == deny ]] && echo drop || echo accept);\n    ct state established,related accept\n    oif lo accept\n  }\n }\n"
-    actions+=$"sudo /usr/bin/env sh -c 'nft list ruleset > /etc/nftables.backup-${ts}'\n"
-    actions+=$"sudo /usr/bin/env sh -c 'cat > /tmp/solen.nft.conf <<\"EOF\"\n${nft_conf}EOF'\n"
-    actions+=$'sudo install -m 0644 /tmp/solen.nft.conf /etc/nftables.conf\n'
+    # Write the config to a securely-created temp file up front (unprivileged,
+    # mktemp uses O_EXCL so it cannot be pre-staged as a symlink), then only
+    # the copy into /etc needs sudo. Avoids shuttling heredoc content through
+    # a fixed, predictable /tmp path via `sudo sh -c`.
+    nft_conf_tmp="$(mktemp)"
+    {
+      printf '# /etc/nftables.conf managed by SOLEN\n'
+      printf 'flush ruleset\n\n'
+      printf 'table inet filter {\n'
+      printf '  chain input { type filter hook input priority 0; policy drop;\n'
+      printf '    ct state established,related accept\n'
+      printf '    iif lo accept\n'
+      printf '    tcp dport %s accept\n' "$ssh_port"
+      for a in "${norm_allows[@]}"; do
+        printf '    %s dport %s accept\n' "${a%%:*}" "${a##*:}"
+      done
+      printf '  }\n'
+      if [[ "$egress" == "deny" ]]; then
+        printf '  chain output { type filter hook output priority 0; policy drop;\n'
+      else
+        printf '  chain output { type filter hook output priority 0; policy accept;\n'
+      fi
+      printf '    ct state established,related accept\n'
+      printf '    oif lo accept\n'
+      printf '  }\n'
+      printf '}\n'
+    } > "$nft_conf_tmp"
+    q_tmp="$(printf '%q' "$nft_conf_tmp")"
+    actions+="sudo /usr/bin/env sh -c 'nft list ruleset > /etc/nftables.backup-${ts}'"$'\n'
+    actions+="sudo install -m 0644 ${q_tmp} /etc/nftables.conf"$'\n'
     actions+=$'sudo nft -f /etc/nftables.conf\n'
-    actions+=$'rm -f /tmp/solen.nft.conf\n'
+    actions+="rm -f ${q_tmp}"$'\n'
   fi
 elif [[ "$chosen" == "iptables" ]]; then
   # Conservative: add explicit accepts first, do not change default policies unless --yes and explicit.
   actions+=$'sudo iptables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
   actions+=$'sudo iptables -C INPUT -i lo -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -i lo -j ACCEPT\n'
-  actions+=$"sudo iptables -C INPUT -p tcp --dport ${ssh_port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p tcp --dport ${ssh_port} -j ACCEPT\n"
-  for a in "${norm_allows[@]:-}"; do
+  actions+="sudo iptables -C INPUT -p tcp --dport ${ssh_port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p tcp --dport ${ssh_port} -j ACCEPT"$'\n'
+  for a in "${norm_allows[@]}"; do
     proto="${a%%:*}"; port="${a##*:}"
-    actions+=$"sudo iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p ${proto} --dport ${port} -j ACCEPT\n"
+    actions+="sudo iptables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo iptables -A INPUT -p ${proto} --dport ${port} -j ACCEPT"$'\n'
   done
-  # IPv6 mirror rules if ip6tables is present
-  actions+=$'command -v ip6tables >/dev/null 2>&1 || exit 0\n'
-  actions+=$'sudo ip6tables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
-  actions+=$'sudo ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -i lo -j ACCEPT\n'
-  actions+=$"sudo ip6tables -C INPUT -p tcp --dport ${ssh_port} -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -p tcp --dport ${ssh_port} -j ACCEPT\n"
-  for a in "${norm_allows[@]:-}"; do
-    proto="${a%%:*}"; port="${a##*:}"
-    actions+=$"sudo ip6tables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -p ${proto} --dport ${port} -j ACCEPT\n"
-  done
+  # IPv6 mirror rules if ip6tables is present (checked at build time; avoids
+  # `exit 0` inside an eval'd action line, which would kill the whole script)
+  if [[ $have_ip6tables -eq 1 ]]; then
+    actions+=$'sudo ip6tables -C INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
+    actions+=$'sudo ip6tables -C INPUT -i lo -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -i lo -j ACCEPT\n'
+    actions+="sudo ip6tables -C INPUT -p tcp --dport ${ssh_port} -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -p tcp --dport ${ssh_port} -j ACCEPT"$'\n'
+    for a in "${norm_allows[@]}"; do
+      proto="${a%%:*}"; port="${a##*:}"
+      actions+="sudo ip6tables -C INPUT -p ${proto} --dport ${port} -j ACCEPT 2>/dev/null || sudo ip6tables -A INPUT -p ${proto} --dport ${port} -j ACCEPT"$'\n'
+    done
+  fi
   if [[ "$egress" == "deny" ]]; then
     actions+=$'sudo iptables -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
     actions+=$'sudo iptables -C OUTPUT -o lo -j ACCEPT 2>/dev/null || sudo iptables -A OUTPUT -o lo -j ACCEPT\n'
     actions+=$'sudo iptables -P OUTPUT DROP\n'
-    actions+=$'command -v ip6tables >/dev/null 2>&1 || exit 0\n'
-    actions+=$'sudo ip6tables -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
-    actions+=$'sudo ip6tables -C OUTPUT -o lo -j ACCEPT 2>/dev/null || sudo ip6tables -A OUTPUT -o lo -j ACCEPT\n'
-    actions+=$'sudo ip6tables -P OUTPUT DROP\n'
+    if [[ $have_ip6tables -eq 1 ]]; then
+      actions+=$'sudo ip6tables -C OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || sudo ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT\n'
+      actions+=$'sudo ip6tables -C OUTPUT -o lo -j ACCEPT 2>/dev/null || sudo ip6tables -A OUTPUT -o lo -j ACCEPT\n'
+      actions+=$'sudo ip6tables -P OUTPUT DROP\n'
+    fi
   fi
   actions+=$'# NOTE: default INPUT policy remains unchanged to avoid lockouts.\n'
 fi
@@ -258,10 +293,10 @@ changed=0
 failed=0
 backup_ipt=""; backup_ip6t=""; backup_nft=""
 if [[ "$chosen" == "iptables" || "$chosen" == "ufw" ]]; then
-  backup_ipt="/tmp/solen.iptables.$$.save"; sudo iptables-save >"$backup_ipt" || true
-  if command -v ip6tables >/dev/null 2>&1; then backup_ip6t="/tmp/solen.ip6tables.$$.save"; sudo ip6tables-save >"$backup_ip6t" || true; fi
+  backup_ipt="$(mktemp)"; sudo iptables-save >"$backup_ipt" || true
+  if command -v ip6tables >/dev/null 2>&1; then backup_ip6t="$(mktemp)"; sudo ip6tables-save >"$backup_ip6t" || true; fi
 elif [[ "$chosen" == "nftables" ]]; then
-  backup_nft="/tmp/solen.nft.$$.rules"; sudo nft list ruleset >"$backup_nft" || true
+  backup_nft="$(mktemp)"; sudo nft list ruleset >"$backup_nft" || true
 fi
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
