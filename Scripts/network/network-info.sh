@@ -113,7 +113,10 @@ D
       [[ -z "$pline" ]] && continue
       proto=$(awk '{print $1}' <<< "$pline")
       localaddr=$(awk '{print $5}' <<< "$pline")
-      proc=$(awk -F 'users:\(\("' '{print $2}' <<< "$pline" | awk -F '"' '{print $1}' 2> /dev/null)
+      # Bracket-expression parens instead of \( \) : gawk's dynamic (-F string)
+      # regex parsing doesn't reliably honor backslash-escaped literal parens
+      # the way a literal /regex/ does, and can fatal with "Unmatched (".
+      proc=$(awk -F 'users:[(][(]"' '{print $2}' <<< "$pline" | awk -F '"' '{print $1}' 2> /dev/null)
       ports_count=$((ports_count + 1))
       summary="port ${proto} ${localaddr}"
       details=$(cat <<D
