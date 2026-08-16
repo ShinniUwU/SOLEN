@@ -1,4 +1,4 @@
-[#] SOLEN periodic update check (user scope default)
+# SOLEN periodic update check (user scope default)
 [Unit]
 Description=SOLEN update manifest check
 Wants=network-online.target

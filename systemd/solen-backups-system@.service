@@ -11,4 +11,16 @@ ExecStart=/usr/local/bin/serverutils run backups/run -- run --profile %i --json
 ExecStartPre=/usr/bin/env mkdir -p /var/log/solen
 StandardOutput=append:/var/log/solen/backups-%i.ndjson
 StandardError=journal
+# Baseline hardening. Not ProtectSystem/ProtectHome: backup sources are
+# arbitrary configured paths across the filesystem (see config/solen-backups.yaml).
+NoNewPrivileges=yes
+ProtectClock=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
 

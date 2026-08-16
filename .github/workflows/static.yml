@@ -111,16 +111,19 @@ jobs:
           }
           sig_algo="rsa-sha256"
           have_key=0
-          if [ -n "${{ secrets.SOLEN_SIGNING_KEY_PEM }}" ]; then
+          key_file=""
+          if [ -n "${SOLEN_SIGNING_KEY_PEM:-}" ]; then
             have_key=1
-            printf '%s' "${{ secrets.SOLEN_SIGNING_KEY_PEM }}" > /tmp/solen_signing_key.pem
+            key_file="$(mktemp)"
+            trap 'rm -f "$key_file"' EXIT
+            printf '%s' "$SOLEN_SIGNING_KEY_PEM" > "$key_file"
             # Compute public key fingerprint (sha256 of DER pubkey)
-            pub_fp=$(openssl pkey -in /tmp/solen_signing_key.pem -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
+            pub_fp=$(openssl pkey -in "$key_file" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')
           fi
           build_manifest() {
             ch="$1"; url="$2"; sha="$3"
             sig=""; str="${ver}|${sha}|${url}|${ts}|${ch}"
-            if [ $have_key -eq 1 ]; then sig=$(sign /tmp/solen_signing_key.pem "$str"); fi
+            if [ $have_key -eq 1 ]; then sig=$(sign "$key_file" "$str"); fi
             json='{ "channel":"'"${ch}"'", "version":"'"${ver}"'", "url":"'"${url}"'", "sha256":"'"${sha}"'", "breaking": false, "date":"'"${ts}"'", "notes_url":"'"${base}"'/CHANGELOG#v'"${ver}"'"'
             if [ -n "$sig" ]; then
               json+=', "sig_algo":"'"${sig_algo}"'", "sig_b64":"'"${sig}"'", "sig_fields":"version|sha256|url|date|channel", "sig_pubkey_fp":"sha256:'"${pub_fp}"'"'
@@ -131,6 +134,8 @@ jobs:
           build_manifest stable "$url_stable" "$sha_stable"
           build_manifest rc "$url_rc" "$sha_rc"
           build_manifest nightly "$url_nightly" "$sha_nightly"
+        env:
+          SOLEN_SIGNING_KEY_PEM: ${{ secrets.SOLEN_SIGNING_KEY_PEM }}
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

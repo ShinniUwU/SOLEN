@@ -32,7 +32,7 @@ jobs:
           echo " "
           echo "🎨 Running 'shfmt -i 2 -ci -sr -d' on ./Scripts and ./serverutils ..."
           echo "-------------------------------------------------------------"
-          docker pull mvdan/shfmt:latest-alpine
-          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:latest-alpine -i 2 -ci -sr -d ./Scripts ./serverutils
+          docker pull mvdan/shfmt:v3.13.1-alpine
+          docker run --rm -v "$(pwd):/mnt" -w /mnt mvdan/shfmt:v3.13.1-alpine -i 2 -ci -sr -d ./Scripts ./serverutils
           echo "-------------------------------------------------------------"
           echo "✅ Formatting check complete! (Will fail if diffs were found)"
