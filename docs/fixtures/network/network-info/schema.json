@@ -1,6 +1,6 @@
 {
   "expressions": [
-    "(has(\\\"details\\\") and (.details|type==\\\"object\\\")) or (has(\\\"metrics\\\") and (.metrics|type==\\\"object\\\"))"
+    "(has(\"details\") and (.details|type==\"object\")) or (has(\"metrics\") and (.metrics|type==\"object\"))"
   ]
 }
 
